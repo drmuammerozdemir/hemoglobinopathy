@@ -402,7 +402,3 @@ if st.button("Raporu üret (tam veri)"):
 st.caption("Performans ipuçları: Çok dosya yüklerken Polars seçeneğini açın, grafikleri ihtiyaç duydukça gösterin, büyük tabloları CSV olarak indirip lokal inceleyin.")
 '''
 
-with open('app.py', 'w', encoding='utf-8') as f:
-    f.write(app_code)
-
-'/mnt/data/app_optimized.py'

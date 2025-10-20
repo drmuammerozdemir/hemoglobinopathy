@@ -325,7 +325,7 @@ with st.expander("Ham Veri Ön İzleme (İlk 200 satır)"):
 st.caption("Not: İki grup varsa Mann–Whitney U; 3+ grup varsa Kruskal–Wallis uygulanır. Normalite bilgilendirme amaçlıdır. 'SOURCE_FILE' sütunu hangi dosyadan geldiğini gösterir.")
 '''
 
-with open('/mnt/data/app.py', 'w', encoding='utf-8') as f:
+with open('app.py', 'w', encoding='utf-8') as f:
     f.write(app_code)
 
 '/mnt/data/app.py'

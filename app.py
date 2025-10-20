@@ -1,7 +1,11 @@
+# Update the Streamlit app to support MULTIPLE Excel uploads and combined analysis.
+# It will overwrite /mnt/data/app.py and keep all previous features, adding multi-file concatenation,
+# file-name filtering, and per-file summaries.
 
+app_code = r'''
 # -*- coding: utf-8 -*-
 """
-🧪 Tetkik Analiz Arayüzü (Streamlit)
+🧪 Tetkik Analiz Arayüzü (Streamlit) — Çoklu Dosya Desteği
 Yazar: Muammer
 Çalıştırma:
     1) pip install streamlit pandas numpy scipy openpyxl matplotlib
@@ -57,15 +61,13 @@ def normality_flag(x: pd.Series, alpha=0.05) -> str:
     x = pd.to_numeric(x, errors="coerce").dropna()
     if len(x) < 3:
         return "yetersiz"
-    # n > 5000 ise normalite testleri aşırı duyarlı; bilgi amaçlı Anderson-Darling kullanıyoruz.
     try:
         if len(x) <= 5000:
             stat, p = stats.shapiro(x)
             return "normal" if p >= alpha else "non-normal"
         else:
             res = stats.anderson(x, dist="norm")
-            # AD için kritik değeri %5 seviyesi alalım
-            crit = res.critical_values[2]  # 15%, 10%, 5%, 2.5%, 1% -> index 2 is 5%
+            crit = res.critical_values[2]  # 5% seviyesi
             return "normal" if res.statistic < crit else "non-normal"
     except Exception:
         return "bilinmiyor"
@@ -97,17 +99,14 @@ def nonparametric_test_by_group(df, val_col, grp_col):
         return f"Kruskal–Wallis: H={stat:.2f}, p={p:.4g} (grup sayısı: {len(unique_groups)})", ("KW", stat, p, unique_groups)
 
 def make_boxplot(df, x_col, y_col, title="Kutu Grafiği"):
-    # Matplotlib ile basit boxplot (her bir kategori için)
     valid = df[[x_col, y_col]].copy()
     valid[y_col] = pd.to_numeric(valid[y_col], errors="coerce")
     valid = valid.dropna()
     if valid.empty:
         st.info("Grafik için yeterli veri yok.")
         return
-
     cats = list(valid[x_col].astype(str).unique())
     data = [valid[valid[x_col].astype(str) == c][y_col].values for c in cats]
-
     fig, ax = plt.subplots()
     ax.boxplot(data, labels=cats, showmeans=True)
     ax.set_title(title)
@@ -132,31 +131,44 @@ def export_df(df, name="export.csv"):
     st.download_button("⬇️ CSV indir", data=csv, file_name=name, mime="text/csv")
 
 # =============== Arayüz =============== #
-st.title("🧪 Tetkik Analiz Arayüzü")
-st.caption("Sütunlar: PROTOKOL_NO, TCKIMLIK_NO, TETKIK_ISMI, TEST_DEGERI, CINSIYET")
+st.title("🧪 Tetkik Analiz Arayüzü — Çoklu Dosya")
+st.caption("Sütunlar: PROTOKOL_NO, TCKIMLIK_NO, TETKIK_ISMI, TEST_DEGERI, CINSIYET — Birden çok Excel dosyasını seçip üst üste analiz edebilirsiniz.")
 
-uploaded = st.file_uploader("Excel dosyası yükleyin (.xlsx, .xls)", type=["xlsx", "xls"])
+uploads = st.file_uploader("Excel dosyaları yükleyin (.xlsx, .xls) — Çoklu seçim yapın", type=["xlsx", "xls"], accept_multiple_files=True)
 
-if uploaded is None:
-    st.info("Örnek veri yapısı: her satır bir ölçüm, 'TETKIK_ISMI' test adını, 'TEST_DEGERI' sayısal değeri içerir. 'CINSIYET' ile gruplama yapılır.")
+if not uploads:
+    st.info("Birden fazla dosyayı aynı anda seçebilir veya yüklemeyi tekrarlayıp ekleyebilirsiniz (Streamlit oturumunda seçtikleriniz tutulur).")
     st.stop()
 
-try:
-    df = pd.read_excel(uploaded)
-except Exception as e:
-    st.error(f"Dosya okunamadı: {e}")
+frames = []
+skipped = []
+for upl in uploads:
+    try:
+        tmp = pd.read_excel(upl)
+        missing = check_columns(tmp)
+        if missing:
+            skipped.append((upl.name, f"Eksik sütun: {missing}"))
+            continue
+        tmp["SOURCE_FILE"] = upl.name
+        frames.append(tmp)
+    except Exception as e:
+        skipped.append((upl.name, f"Okuma hatası: {e}"))
+
+if skipped:
+    for nm, msg in skipped:
+        st.warning(f"'{nm}' atlandı → {msg}")
+
+if not frames:
+    st.error("Yüklenen dosyaların hiçbirinden uygun veri okunamadı.")
     st.stop()
 
-missing = check_columns(df)
-if missing:
-    st.error(f"Eksik sütunlar: {missing}. Lütfen tam şu başlıkları kullanın: {REQ_COLS}")
-    st.stop()
+df = pd.concat(frames, ignore_index=True)
 
 # Sayısal dönüştürme
 df["TEST_DEGERI"] = coerce_numeric(df["TEST_DEGERI"])
 
 # Filtreler
-left, right = st.columns([2, 1])
+left, right = st.columns([3, 2])
 with left:
     # Tetkik seçimi
     unique_tests = sorted([str(x) for x in df["TETKIK_ISMI"].dropna().unique()])
@@ -165,28 +177,43 @@ with right:
     # Cinsiyet filtresi (opsiyonel)
     sexes = [str(x) for x in df["CINSIYET"].dropna().unique()]
     chosen_sex = st.multiselect("Cinsiyet filtresi (opsiyonel)", options=sexes, default=sexes)
+    # Dosya filtresi (opsiyonel)
+    files = [str(x) for x in df["SOURCE_FILE"].dropna().unique()]
+    chosen_files = st.multiselect("Dosya filtresi (opsiyonel)", options=files, default=files)
 
 # Veri alt kümesi
 work = df.copy()
 if chosen_sex:
     work = work[work["CINSIYET"].astype(str).isin(chosen_sex)]
+if chosen_files:
+    work = work[work["SOURCE_FILE"].astype(str).isin(chosen_files)]
 if selected_tests:
     work = work[work["TETKIK_ISMI"].astype(str).isin(selected_tests)]
 
-st.subheader("🔎 Genel Bilgiler")
-c1, c2, c3, c4 = st.columns(4)
+st.subheader("🔎 Genel Bilgiler (Birleştirilmiş Veri)")
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Toplam Satır", f"{len(df):,}")
 c2.metric("Benzersiz TCKIMLIK_NO", f"{df['TCKIMLIK_NO'].nunique():,}")
 c3.metric("Benzersiz Tetkik", f"{df['TETKIK_ISMI'].nunique():,}")
 c4.metric("Benzersiz Cinsiyet", f"{df['CINSIYET'].nunique():,}")
+c5.metric("Dosya Sayısı", f"{df['SOURCE_FILE'].nunique():,}")
 
-st.write("Seçimden sonra kalan satır sayısı:", len(work))
+st.write("Seçimler sonrası kalan satır sayısı:", len(work))
+
+# =============== Dosya Bazında Özet (Opsiyonel) =============== #
+with st.expander("📦 Dosya Bazında Özet (N, tetkik sayısı, hasta sayısı)"):
+    per_file = df.groupby("SOURCE_FILE").agg(
+        N=("PROTOKOL_NO", "size"),
+        Hasta_Sayisi=("TCKIMLIK_NO", "nunique"),
+        Tetkik_Sayisi=("TETKIK_ISMI", "nunique")
+    ).reset_index()
+    st.dataframe(per_file, use_container_width=True)
+    export_df(per_file, "dosya_bazinda_ozet.csv")
 
 # =============== Her Tetkik İçin Ayrı Analiz =============== #
-st.header("📊 Tetkik Bazlı Analiz")
+st.header("📊 Tetkik Bazlı Analiz (Birleştirilmiş + Filtreli)")
 
 results_rows = []
-group_tables = []
 
 for test_name in selected_tests:
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
@@ -202,10 +229,13 @@ for test_name in selected_tests:
     # Cinsiyet kırılımı
     by_sex = sub.groupby("CINSIYET", dropna=False)["TEST_DEGERI"].apply(descr_stats).apply(pd.Series).reset_index()
 
+    # Kaynak dosyaya göre kırılım
+    by_file = sub.groupby("SOURCE_FILE", dropna=False)["TEST_DEGERI"].apply(descr_stats).apply(pd.Series).reset_index()
+
     # Karşılaştırma testi
     msg, test_info = nonparametric_test_by_group(sub, "TEST_DEGERI", "CINSIYET")
 
-    # Özet tablo satırı (rapor konsolidasyonu için)
+    # Özet tablo satırı
     results_rows.append({
         "TETKIK_ISMI": test_name,
         "N": stats_overall["count"],
@@ -221,19 +251,22 @@ for test_name in selected_tests:
     })
 
     # Gösterimler
-    tabs = st.tabs(["Tanımlayıcı", "Cinsiyet Kırılımı", "İstatistiksel Test", "Histogram", "Boxplot (Cinsiyete göre)"])
+    tabs = st.tabs(["Tanımlayıcı", "Cinsiyet Kırılımı", "Dosya Kırılımı", "İstatistiksel Test", "Histogram", "Boxplot (Cinsiyete göre)"])
     with tabs[0]:
         st.write("**Genel Tanımlayıcı İstatistikler**")
         st.table(pd.DataFrame([stats_overall]))
     with tabs[1]:
         st.write("**Cinsiyete Göre Tanımlayıcılar**")
-        st.dataframe(by_sex)
+        st.dataframe(by_sex, use_container_width=True)
     with tabs[2]:
+        st.write("**Kaynak Dosyaya Göre Tanımlayıcılar**")
+        st.dataframe(by_file, use_container_width=True)
+    with tabs[3]:
         st.write("**Karşılaştırma (Nonparametrik)**")
         st.info(msg)
-    with tabs[3]:
-        make_hist(sub, "TEST_DEGERI", bins=30, title=f"{test_name} - Histogram")
     with tabs[4]:
+        make_hist(sub, "TEST_DEGERI", bins=30, title=f"{test_name} - Histogram")
+    with tabs[5]:
         make_boxplot(sub, "CINSIYET", "TEST_DEGERI", title=f"{test_name} - Cinsiyete Göre Boxplot")
 
 # Toplu özet
@@ -244,7 +277,7 @@ if results_rows:
     export_df(res_df, name="tetkik_ozet.csv")
 
 # =============== Tüm Tetkikler için Otomatik Rapor =============== #
-st.header("📑 Otomatik Rapor (Tüm Tetkikler)")
+st.header("📑 Otomatik Rapor (Tüm Tetkikler, Birleştirilmiş Veri)")
 if st.button("Tüm tetkikler için raporu üret"):
     rows = []
     for t in sorted(df["TETKIK_ISMI"].dropna().astype(str).unique()):
@@ -278,7 +311,7 @@ if st.button("Tüm tetkikler için raporu üret"):
 
 # =============== Ek Araçlar =============== #
 st.header("🧰 Ek Araçlar")
-with st.expander("Pivot: TCKIMLIK_NO × Tetkik sayıları"):
+with st.expander("Pivot: TCKIMLIK_NO × Tetkik sayıları (Birleştirilmiş)"):
     pivot = (df
              .assign(has_val=df["TEST_DEGERI"].notna().astype(int))
              .pivot_table(index="TCKIMLIK_NO", columns="TETKIK_ISMI", values="has_val",
@@ -286,7 +319,13 @@ with st.expander("Pivot: TCKIMLIK_NO × Tetkik sayıları"):
     st.dataframe(pivot)
     export_df(pivot.reset_index(), name="pivot_tckimlik_tetkik.csv")
 
-with st.expander("Ham Veri Ön İzleme"):
+with st.expander("Ham Veri Ön İzleme (İlk 200 satır)"):
     st.dataframe(df.head(200))
 
-st.caption("Not: İki grup varsa Mann–Whitney U; 3+ grup varsa Kruskal–Wallis uygulanır. Normalite bilgilendirme amaçlıdır.")
+st.caption("Not: İki grup varsa Mann–Whitney U; 3+ grup varsa Kruskal–Wallis uygulanır. Normalite bilgilendirme amaçlıdır. 'SOURCE_FILE' sütunu hangi dosyadan geldiğini gösterir.")
+'''
+
+with open('/mnt/data/app.py', 'w', encoding='utf-8') as f:
+    f.write(app_code)
+
+'/mnt/data/app.py'

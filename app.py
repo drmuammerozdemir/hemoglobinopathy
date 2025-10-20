@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 🧪 Tetkik Analiz Arayüzü (Streamlit)
-Yazar: ChatGPT (Muammer Hoca için)
+Yazar: Muammer
 Çalıştırma:
     1) pip install streamlit pandas numpy scipy openpyxl matplotlib
     2) streamlit run app.py

@@ -406,3 +406,92 @@ with open('app.py', 'w', encoding='utf-8') as f:
     f.write(app_code)
 
 '/mnt/data/app_optimized.py'
+# ================= Klinik Tablo (β-talasemi tarzı) ================= #
+st.header("📋 Klinik Tablo — Hematolojik Bulgular (Otomatik)")
+
+src_choice = st.radio(
+    "Veri kaynağı",
+    ["Seçimdeki veri (work)", "Tüm veri (df)"],
+    index=0,
+    horizontal=True
+)
+base = work.copy() if src_choice.startswith("Seçimdeki") else df.copy()
+
+# Hedef parametreler ve referans aralıkları (gerekirse düzenleyebilirsin)
+params = [
+    ("Age (years)", None),   # Yaş yoksa otomatik boş kalır
+    ("Hb (g/dL)", "Hb"),     # (TETKIK_ISMI'ndeki ad)
+    ("HCT (%)", "HCT"),
+    ("RBC (×10⁶)", "RBC"),
+    ("RDW (%)", "RDW"),
+    ("MCV (fL)", "MCV"),
+    ("MCH (pg)", "MCH"),
+    ("MCHC (g/dL)", "MCHC"),
+    ("HbA (%)", "HbA"),
+    ("HbA₂ (%)", "HbA2"),
+    ("Hb F (%)", "HbF"),
+]
+
+ref_ranges = {
+    "Hb (g/dL)": "F: 11–15; M: 12–17",
+    "HCT (%)":   "F: 36–46; M: 40–53",
+    "RBC (×10⁶)": "F: 3.9–5.6; M: 4.5–6.0",
+    "RDW (%)":   "11–16",
+    "MCV (fL)":  "80–100",
+    "MCH (pg)":  "27–34",
+    "MCHC (g/dL)": "32–36",
+    "HbA (%)":   "94–98",
+    "HbA₂ (%)":  "2–3.5",
+    "Hb F (%)":  "0–2",
+    "Age (years)": "—",
+}
+
+# Cinsiyet normalizasyonu
+sex_map = {
+    "e": "Male", "erkek": "Male", "m": "Male", "male": "Male",
+    "k": "Female","kadın":"Female","f":"Female","female":"Female"
+}
+base["__SEX__"] = (
+    base["CINSIYET"].astype(str).str.strip().str.lower().map(sex_map)
+)
+# TEST_DEGERI sayısal güvence
+base["__VAL__"] = pd.to_numeric(
+    base["TEST_DEGERI"].astype(str).str.replace(",", ".", regex=False),
+    errors="coerce"
+)
+
+def fmt_mean_sd(s: pd.Series, nd=2):
+    s = pd.to_numeric(s, errors="coerce").dropna()
+    if len(s) == 0:
+        return "—"
+    return f"{s.mean():.{nd}f} ± {s.std(ddof=1):.{nd}f}"
+
+rows = []
+for label, tetkik_ismi in params:
+    # Age yoksa "—" bırak (datasetinde AGE sütunu varsa 'AGE'→numeric yapıp buraya entegre edebilirsin)
+    if tetkik_ismi is None:
+        female = "—"
+        male = "—"
+    else:
+        sub = base[base["TETKIK_ISMI"].astype(str) == tetkik_ismi].copy()
+        female = fmt_mean_sd(sub.loc[sub["__SEX__"]=="Female", "__VAL__"])
+        male   = fmt_mean_sd(sub.loc[sub["__SEX__"]=="Male", "__VAL__"])
+
+    rows.append({
+        "Parameter": label,
+        "Female (Mean ± SD)": female,
+        "Male (Mean ± SD)": male,
+        "Reference range": ref_ranges.get(label, "—")
+    })
+
+table_df = pd.DataFrame(rows)
+
+# Görüntüle + indir
+st.dataframe(table_df, use_container_width=True)
+csv_bytes = table_df.to_csv(index=False).encode("utf-8-sig")
+st.download_button("⬇️ Tabloyu CSV indir", data=csv_bytes, file_name="klinik_tablo.csv", mime="text/csv")
+
+st.caption(
+    "Not: Cinsiyet eşleştirmesi E/K/Erkek/Kadın/Male/Female yazımlarını otomatik algılar. "
+    "Yaş (Age) veriniz yoksa satır '—' kalır. İstersen AGE/YAŞ sütununu eklersen hesaplarım."
+)

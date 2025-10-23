@@ -254,130 +254,130 @@ if chosen_files:
 if selected_tests:
     work = work[work["TETKIK_ISMI"].astype(str).isin(selected_tests)]
 
-# ================= Akıllı Sayısallaştırma (TEST_DEGERI) ================= #
-st.header("🧹 Akıllı Sayısallaştırma — TEST_DEGERI metinden sayıya")
+# ================= Ön-izleme & Müdahale: Metinden Sayıya ================= #
+import re
+import numpy as np
+import pandas as pd
+import streamlit as st
 
-with st.expander("Ayarlar ve Ön-izleme", expanded=False):
-    range_rule = st.selectbox(
-        "Aralıkları (örn. 12–14) nasıl işle?",
-        ["Ortalama al (12–14 → 13.0)", "Alt sınır (12)", "Üst sınır (14)"],
-        index=0
-    )
-    lt_rule = st.selectbox(
-        "Küçüktür (<, ≤) nasıl işle? (örn. <0,1)",
-        ["Sınırı kullan (0.1)", "Sınırın yarısı (0.05)", "NaN bırak"],
-        index=1
-    )
-    gt_rule = st.selectbox(
-        "Büyüktür (>, ≥) nasıl işle? (örn. >1000)",
-        ["Sınırı kullan (1000)", "NaN bırak"],
-        index=0
-    )
-    handle_percent = st.checkbox("Yüzde işaretini (%) otomatik kaldır ve 15% → 15.0 yap", value=True)
+# --- Yardımcılar (esnek sayı çözücü) ---
+def _dec_fix(x: str) -> str:
+    s = x.replace("\xa0", " ").strip()
+    # hem '.' hem ',' varsa: sondaki ayraç ondalık, diğerleri binlik sayılır
+    if "," in s and "." in s:
+        last = max(s.rfind(","), s.rfind("."))
+        dec = s[last]
+        s = re.sub(r"[.,](?=\d{3}\b)", "", s)  # binlikleri at
+        s = s.replace(dec, ".")
+    elif "," in s:
+        s = s.replace(".", "")         # olası binlik noktaları
+        s = s.replace(",", ".")        # ondalık virgül → nokta
+    else:
+        s = re.sub(r"\.(?=\d{3}\b)", "", s)  # binlik noktayı at
+    return s
 
-    # Ortak yardımcılar
-    import re
-    def _dec_fix(x: str) -> str:
-        # binlik ayraçları ayıkla, ondalığı noktaya çevir
-        s = x.replace("\xa0", " ").strip()
-        # Eğer hem '.' hem ',' var: son görülen ayraç ondalık kabul, diğerleri silinir
-        if "," in s and "." in s:
-            last = max(s.rfind(","), s.rfind("."))
-            dec = s[last]
-            # binlikleri at
-            tmp = re.sub(r"[.,](?=\d{3}\b)", "", s)
-            # ondalık ayracını noktaya çevir
-            tmp = tmp.replace(dec, ".")
-            s = tmp
-        elif "," in s and "." not in s:
-            s = s.replace(".", "")  # olası binlik noktalarını sil (nadiren olur)
-            s = s.replace(",", ".")
-        else:
-            # sadece nokta varsa aynen kalsın; binlik noktalarını temizle
-            s = re.sub(r"\.(?=\d{3}\b)", "", s)
-        return s
-
-    def smart_number(text: str):
-        if text is None:
-            return None
-        s = str(text).strip().lower()
-        if s == "" or s in {"nan", "na", "n/a", "yok", "boş", "empty", "nd"}:
-            return None
-        # pozitif/negatif sınıfları (istersen ayarla)
-        if s in {"pozitif", "+", "positive", "pos"}:
-            return 1.0
-        if s in {"negatif", "-", "negative", "neg"}:
-            return 0.0
-        # yüzdeleri temizle
-        if handle_percent:
-            s = s.replace("%", " ")
-
-        # eşitsizlikler: <, >, ≤, ≥
-        m_ineq = re.match(r"^\s*([<>]=?)\s*([0-9.,]+)", s)
-        if m_ineq:
-            op, num = m_ineq.groups()
-            num = _dec_fix(num)
-            try:
-                v = float(num)
-            except:
-                v = None
-            if v is not None:
-                if op in ("<", "<="):
-                    if lt_rule.startswith("Sınırın yarısı"):
-                        return v / 2.0
-                    elif lt_rule.startswith("NaN"):
-                        return None
-                    else:
-                        return v
-                else:  # > or >=
-                    if gt_rule.startswith("NaN"):
-                        return None
-                    else:
-                        return v
-
-        # aralık: 12-14, 12–14, 12 — 14
-        m_rng = re.match(r"^\s*([+-]?\d[\d.,]*)\s*[-–—]\s*([+-]?\d[\d.,]*)", s)
-        if m_rng:
-            a, b = m_rng.groups()
-            a = float(_dec_fix(a))
-            b = float(_dec_fix(b))
-            if range_rule.startswith("Alt"):
-                return a
-            elif range_rule.startswith("Üst"):
-                return b
-            else:
-                return (a + b) / 2.0
-
-        # içinde sayı geçen metin: “12,3 g/dl”, “Hb: 10.5”, “~7,0”
-        m_any = re.search(r"[+-]?\d[\d.,]*", s)
-        if m_any:
-            num = _dec_fix(m_any.group(0))
-            try:
-                return float(num)
-            except:
-                return None
-
+def smart_number(text: str):
+    """Öneri üretir (float veya None). Birimleri, %, < >, aralıkları yakalar."""
+    if text is None: 
         return None
+    s = str(text).strip().lower()
+    if s in {"", "nan", "na", "n/a", "yok", "boş", "empty", "nd"}:
+        return None
+    if s in {"pozitif", "+", "positive", "pos"}: return 1.0
+    if s in {"negatif", "-", "negative", "neg"}: return 0.0
 
-    # Ön-izleme: ilk 300 problemli satır
-    _orig = work["TEST_DEGERI"].astype(str)
-    parsed = _orig.map(smart_number)
-    mask_problem = parsed.isna() & _orig.notna() | (_orig.str.contains(r"[A-Za-z%<>]|[-–—].*[-–—]", regex=True))
-    preview = work.loc[mask_problem, ["TETKIK_ISMI", "CINSIYET", "TEST_DEGERI"]].copy()
-    preview["PARSED"] = _orig.loc[preview.index].map(smart_number)
-    st.write("Ön-izleme (problemli/temizlenecek örnekler):")
-    st.dataframe(preview.head(300), use_container_width=True)
+    # yüzde (15% → 15)
+    s = s.replace("%", " ")
 
-    if st.button("✅ Dönüştür ve yeni sütuna yaz (TEST_DEGERI_CLEAN)"):
-        work["TEST_DEGERI_CLEAN"] = _orig.map(smart_number)
-        st.success(f"Dönüşüm tamam: {work['TEST_DEGERI_CLEAN'].notna().sum():,} satır sayıya çevrildi, "
-                   f"{work['TEST_DEGERI_CLEAN'].isna().sum():,} satır NaN kaldı.")
-        # İstersen ana sütunu da güncelle:
-        # work["TEST_DEGERI"] = work["TEST_DEGERI_CLEAN"]
-        st.session_state["work_with_clean"] = work.copy()
-        # Dışa aktar
-        st.download_button("⬇️ Temiz veri (CSV)", data=work.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="temizlenmis_veri.csv", mime="text/csv")
+    # eşitsizlikler (<, ≤, >, ≥) → sınır değer (isteğe göre geliştirebiliriz)
+    m_ineq = re.match(r"^\s*([<>]=?)\s*([0-9.,]+)", s)
+    if m_ineq:
+        op, num = m_ineq.groups()
+        try: v = float(_dec_fix(num))
+        except: v = None
+        return v
+
+    # aralıklar (12–14, 12-14) → ortalama
+    m_rng = re.match(r"^\s*([+-]?\d[\d.,]*)\s*[-–—]\s*([+-]?\d[\d.,]*)", s)
+    if m_rng:
+        a, b = m_rng.groups()
+        try:
+            a = float(_dec_fix(a)); b = float(_dec_fix(b))
+            return (a + b) / 2.0
+        except:
+            return None
+
+    # metin içindeki ilk sayıyı çek (12,3 g/dL vb.)
+    m_any = re.search(r"[+-]?\d[\d.,]*", s)
+    if m_any:
+        try: return float(_dec_fix(m_any.group(0)))
+        except: return None
+
+    return None
+
+# --- Problem yakalama: Öneri + işaretleme ---
+orig = work["TEST_DEGERI"].astype(str)
+suggested = orig.map(smart_number)
+
+# “problemli” kriteri: numeric'e çevrilemiyor ya da metinde işaret/harf/aralık var
+mask_problem = (
+    suggested.isna() |
+    orig.str.contains(r"[A-Za-z%<>]|[-–—].*[-–—]", regex=True)
+)
+
+# İnceleme tablosu: orijinal + öneri + düzenlenebilir hedef
+preview = work.loc[mask_problem, [
+    "TETKIK_ISMI", "CINSIYET", "PROTOKOL_NO", "TCKIMLIK_NO", "TEST_DEGERI"
+]].copy()
+
+preview = preview.reset_index().rename(columns={"index": "__ROW_ID__"})
+preview["SUGGESTED"] = suggested.loc[preview["__ROW_ID__"]].values
+
+st.header("🧹 Problemli Değerler — Ön-izleme & Müdahale")
+st.caption("Aşağıda metin içerikli/sorunlu tüm değerler listelenir. 'CLEAN_VALUE' sütununu elle düzeltebilirsin.")
+
+# Düzenlenebilir sütun: CLEAN_VALUE (başlangıçta öneri)
+preview["CLEAN_VALUE"] = preview["SUGGESTED"]
+
+edited = st.data_editor(
+    preview,
+    use_container_width=True,
+    num_rows="fixed",
+    column_config={
+        "__ROW_ID__": st.column_config.NumberColumn(label="RowID", help="Orijinal satır indeksi", disabled=True),
+        "TEST_DEGERI": st.column_config.TextColumn(label="ORIGINAL", help="Ham değer", disabled=True),
+        "SUGGESTED": st.column_config.NumberColumn(label="ÖNERİ (otomatik)", help="Algoritmanın önerdiği", disabled=True),
+        "CLEAN_VALUE": st.column_config.NumberColumn(label="CLEAN_VALUE (elle düzenle)", help="Burayı istediğin gibi değiştir"),
+    },
+    hide_index=True
+)
+
+col_apply, col_opts = st.columns([1,1])
+with col_apply:
+    apply_now = st.button("✅ Düzenlemeleri uygula (TEST_DEGERI_CLEAN)")
+
+with col_opts:
+    overwrite_main = st.checkbox("TEST_DEGERI sütununu CLEAN_VALUE ile değiştir", value=False)
+
+if apply_now:
+    # Son kullanıcının girdiklerini orijinal work'e geri yaz
+    updates = edited[["__ROW_ID__", "CLEAN_VALUE"]].dropna(subset=["__ROW_ID__"])
+    work.loc[updates["__ROW_ID__"].values, "TEST_DEGERI_CLEAN"] = updates["CLEAN_VALUE"].values
+
+    if overwrite_main:
+        work.loc[updates["__ROW_ID__"].values, "TEST_DEGERI"] = updates["CLEAN_VALUE"].values
+
+    st.success(
+        f"Güncellendi: {updates['__ROW_ID__'].nunique():,} satır için CLEAN_VALUE uygulandı. "
+        f"{'TEST_DEGERI de güncellendi.' if overwrite_main else 'TEST_DEGERI_CLEAN sütunu oluşturuldu/güncellendi.'}"
+    )
+    st.download_button(
+        "⬇️ Temiz/duzeltilmiş veriyi indir (CSV)",
+        data=work.to_csv(index=False).encode("utf-8-sig"),
+        file_name="temizlenmis_veri.csv",
+        mime="text/csv"
+    )
+
 
 
 # ================= Genel Bilgiler ================= #

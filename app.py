@@ -142,7 +142,23 @@ def normality_flag(x: pd.Series, alpha=0.05) -> str:
             return "normal" if res.statistic < crit else "non-normal"
     except Exception:
         return "bilinmiyor"
+        
+def add_numeric_copy(frame, src_col="TEST_DEGERI", out_col="__VAL_NUM__"):
+    if out_col not in frame.columns:
+        tmp = (frame[src_col].astype(str)
+               .str.replace(",", ".", regex=False)
+               .str.replace(" ", "", regex=False))
+        frame[out_col] = pd.to_numeric(tmp, errors="coerce")
+    return frame
 
+def apply_threshold(series, rule):
+    op, cut = rule
+    if op == ">=": return series >= cut
+    if op == ">":  return series >  cut
+    if op == "<=": return series <= cut
+    if op == "<":  return series <  cut
+    return series.notna()
+    
 def nonparametric_test_by_group(df, val_col, grp_col):
     # Gruplar
     groups = [g.dropna() for _, g in df.groupby(grp_col)[val_col]]

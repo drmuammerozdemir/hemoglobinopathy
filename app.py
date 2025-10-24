@@ -62,7 +62,18 @@ except Exception:
 def coerce_numeric(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.replace(",", ".", regex=False).str.replace(" ", "", regex=False)
     return pd.to_numeric(s, errors="coerce")
-
+    
+# __VAL_NUM__ kolonunu güvenle oluşturur (yoksa ekler)
+def add_numeric_copy(frame, src_col="TEST_DEGERI", out_col="__VAL_NUM__"):
+    if out_col not in frame.columns:
+        tmp = (
+            frame[src_col].astype(str)
+            .str.replace(",", ".", regex=False)
+            .str.replace(" ", "", regex=False)
+        )
+        frame[out_col] = pd.to_numeric(tmp, errors="coerce")
+    return frame
+    
 def check_columns(df: pd.DataFrame):
     return [c for c in REQ_COLS if c not in df.columns]
 
@@ -643,6 +654,8 @@ results_rows = []
 
 for test_name in selected_tests:
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
+    # __VAL_NUM__ kesin olsun (KeyError fix)
+    sub = add_numeric_copy(sub)
     if sub.empty:
         continue
 
@@ -738,14 +751,6 @@ for test_name in selected_tests:
             .reset_index()
         )
         freq_all["%"] = (freq_all["N"] / freq_all["N"].sum() * 100).round(2)
-        # --- Sayısal kopya oluştur (virgül → nokta, boşlukları temizle) ---
-        sub = sub.copy()
-        sub["__VAL_NUM__"] = (
-            sub["TEST_DEGERI"].astype(str)
-            .str.replace(",", ".", regex=False)
-            .str.replace(" ", "", regex=False)
-        )
-        sub["__VAL_NUM__"] = pd.to_numeric(sub["__VAL_NUM__"], errors="coerce")        
 
         freq_by_sex = (
             sub_cat.pivot_table(index="__CAT__", columns="CINSIYET",

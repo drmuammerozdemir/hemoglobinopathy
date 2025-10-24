@@ -43,6 +43,12 @@ CATEGORICAL_TESTS = {
     "Anormal Hb/",
     "Talasemi(HPLC) (A0)/",
 }
+# >0 ise "pozitif" sayılacak varyant yüzdeleri (ihtiyacına göre genişlet)
+VARIANT_NUMERIC_TESTS = {
+    "HbS (%)", "HbC (%)", "HbD (%)", "HbE (%)",
+    "HbF (%)", "HbA2 (%)",   # eşik kullanacaksan ayrıca ekleriz
+    "Anormal Hb/"            # sayı geliyorsa >0 filtre uygular
+}
 DISPLAY_LIMIT = 200  # Büyük veri için önizleme limiti
 
 # Polars mevcut mu?
@@ -651,6 +657,25 @@ for test_name in selected_tests:
 
     if is_categorical:
         st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi yapılacak).")
+    # ----- VARYANT POZİTİF FİLTRESİ: sadece >0 değerler dahil olsun -----
+    positive_only = st.checkbox(
+        f"‘{test_name}’ için sadece > 0 değerleri dahil et (varyant-pozitif filtre)",
+        value=(test_name in VARIANT_NUMERIC_TESTS),
+        key=f"pos_only_{test_name}"
+    )
+
+    sub_num = sub.copy()
+    sub_num["__VAL_NUM__"] = (
+        sub_num["TEST_DEGERI"].astype(str)
+        .str.replace(",", ".", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
+    sub_num["__VAL_NUM__"] = pd.to_numeric(sub_num["__VAL_NUM__"], errors="coerce")
+
+    if positive_only:
+        sub_num = sub_num[sub_num["__VAL_NUM__"] > 0]
+        if sub_num.empty:
+            st.warning("Bu tetkikte (>0) pozitif satır bulunamadı.")
 
         # ====== Normalizasyon Fonksiyonları ====== #
         import re

@@ -311,53 +311,73 @@ if selected_tests:
 # ================= VARYANT ÖZETLERİ (Anormal Hb / HPLC → Etiket + Özet) ================= #
 import re
 
-# Aliases: dosyanızdaki tetkik adları farklıysa buraya ekleyin
-A2_KEYS = {"HbA2 (%)", "A2/", "HbA2"}
-F_KEYS  = {"HbF (%)", "F/", "HbF"}
+# Dosyanızdaki olası isimler (gerekirse genişletin)
+A2_KEYS = {"HbA2 (%)", "A2/", "HbA2", "Hb A2 (%)", "Hb A2"}
+F_KEYS  = {"HbF (%)", "F/", "HbF", "Hb F (%)", "Hb F"}
 
-# Metinsel “Anormal Hb/” normalizasyonu
+# Olası varyant yüzde test adları (regex) – HbS/HbC/HbD/HbE sayısal kolonlarını da bulalım
+VARIANT_NUMERIC_PATTERNS = {
+    "HbS": re.compile(r"(?i)\bhb\s*s\b.*%|\bHbS\b.*%|^HbS ?\(%\)$"),
+    "HbC": re.compile(r"(?i)\bhb\s*c\b.*%|\bHbC\b.*%|^HbC ?\(%\)$"),
+    "HbD": re.compile(r"(?i)\bhb\s*d\b.*%|\bHbD\b.*%|^HbD ?\(%\)$"),
+    "HbE": re.compile(r"(?i)\bhb\s*e\b.*%|\bHbE\b.*%|^HbE ?\(%\)$"),
+}
+
 def norm_anormal_hb(x: str):
+    """Anormal Hb/ metninden etiket çıkar."""
     if x is None: return None
-    s = str(x).upper().replace("İ", "I").strip()
+    s = str(x).upper().replace("İ","I").strip()
+    # S-β tal
     if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
-    if re.search(r"\bHBS\b", s): return "HbS"
+    # HbS varyantı
+    if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
+    # HbC/D/E
     if re.search(r"\bHBC\b", s): return "HbC"
     if re.search(r"\bHBD\b", s): return "HbD"
     if re.search(r"\bHBE\b", s): return "HbE"
-    if re.search(r"A2|HBA2", s):   return "HbA2↑"
-    if re.search(r"\bF\b|HBF", s): return "HbF↑"
-    if re.search(r"NORMAL|NEG", s):return "Normal"
+    # A2/F artışı
+    if re.search(r"\bA2\b|HBA2", s):   return "HbA2↑"
+    if re.search(r"\bF\b|HBF", s):     return "HbF↑"
+    # Normal ifadesi
+    if re.search(r"\bNORMAL\b|NEG", s):return "Normal"
     return None
-
-# Sayısal güvence (her satırda)
-work = add_numeric_copy(work)
 
 # PROTOKOL_NO bazında VARIANT_TAG üret
 def pick_variant_tag(g: pd.DataFrame) -> str | None:
-    # 1) “Anormal Hb/” metinlerinden
-    txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
-    tags = [t for t in (norm_anormal_hb(v) for v in txt) if t]
+    tags = []
 
-    # 2) HbA2 eşik (erişkin)
+    # 1) “Anormal Hb/” metinleri
+    txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
+    tags.extend([t for t in (norm_anormal_hb(v) for v in txt) if t])
+
+    # 2) HbA2 eşiği (erişkin)
     a2_vals = g[g["TETKIK_ISMI"].isin(A2_KEYS)]["__VAL_NUM__"].dropna()
     if not a2_vals.empty and a2_vals.max() >= 3.5:
         tags.append("HbA2↑")
 
-    # 3) HbF eşik (erişkin)
+    # 3) HbF eşiği (erişkin)
     f_vals = g[g["TETKIK_ISMI"].isin(F_KEYS)]["__VAL_NUM__"].dropna()
     if not f_vals.empty and f_vals.max() > 2.0:
         tags.append("HbF↑")
 
+    # 4) HbS/HbC/HbD/HbE yüzde kolonlarını yakala (>0 ise etiketle)
+    for var_name, pat in VARIANT_NUMERIC_PATTERNS.items():
+        mask = g["TETKIK_ISMI"].astype(str).str.match(pat)
+        if mask.any():
+            vals = g.loc[mask, "__VAL_NUM__"].dropna()
+            if not vals.empty and (vals > 0).any():
+                tags.append(var_name)
+
     if not tags:
-        # hiç bulgu yoksa Normal demeyelim; etiket oluşturmayalım:
         return None
 
-    # Öncelik sırası: patolojik olanlar önce
+    # Öncelik: patolojik önce
     priority = ["Hb S-β-thal", "HbS", "HbC", "HbD", "HbE", "HbA2↑", "HbF↑", "Normal"]
     for p in priority:
         if p in tags:
             return p
     return tags[0]
+
 
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", as_index=False)

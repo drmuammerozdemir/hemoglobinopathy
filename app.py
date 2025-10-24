@@ -37,6 +37,12 @@ from concurrent.futures import ThreadPoolExecutor
 # ============== Ayarlar ============== #
 st.set_page_config(page_title="Tetkik Analiz — Optimize", layout="wide")
 REQ_COLS = ["PROTOKOL_NO", "TCKIMLIK_NO", "TETKIK_ISMI", "TEST_DEGERI", "CINSIYET"]
+# Standart kategorik tetkikler (metin sonucu üreten)
+CATEGORICAL_TESTS = {
+    "Kan Grubu/",
+    "Anormal Hb/",
+    "Talasemi(HPLC) (A0)/",
+}
 DISPLAY_LIMIT = 200  # Büyük veri için önizleme limiti
 
 # Polars mevcut mu?
@@ -320,9 +326,12 @@ orig = work["TEST_DEGERI"].astype(str)
 suggested = orig.map(smart_number)
 
 # “problemli” kriteri: numeric'e çevrilemiyor ya da metinde işaret/harf/aralık var
+is_categorical_row = work["TETKIK_ISMI"].astype(str).isin(CATEGORICAL_TESTS)
 mask_problem = (
-    suggested.isna() |
-    orig.str.contains(r"[A-Za-z%<>]|[-–—].*[-–—]", regex=True)
+    (~is_categorical_row) & (
+        suggested.isna() |
+        orig.str.contains(r"[A-Za-z%<>]|[-–—].*[-–—]", regex=True)
+    )
 )
 
 # İnceleme tablosu: orijinal + öneri + düzenlenebilir hedef
@@ -438,6 +447,113 @@ for test_name in selected_tests:
         continue
 
     st.subheader(f"🧷 {test_name}")
+        # --- Kategorik mi? ---
+    is_categorical = test_name in CATEGORICAL_TESTS
+    if not is_categorical:
+        vals = sub["TEST_DEGERI"].astype(str)
+        num_ok = pd.to_numeric(vals.str.replace(",", ".", regex=False), errors="coerce").notna().mean()
+        if num_ok < 0.6:
+            is_categorical = True
+
+    if is_categorical:
+        st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi yapılacak).")
+
+        # ====== Normalizasyon Fonksiyonları ====== #
+        import re
+
+        def normalize_blood_group(x):
+            if not isinstance(x, str):
+                return None
+            s = x.upper().replace("İ", "I").strip()
+            abo = None
+            if re.search(r"\bAB\b", s): abo = "AB"
+            elif re.search(r"\bA\b", s): abo = "A"
+            elif re.search(r"\bB\b", s): abo = "B"
+            elif re.search(r"\b0\b|\bO\b", s): abo = "O"
+            rh = "Rh(+)" if re.search(r"(\+|POS|POZ|RH\+)", s) else "Rh(-)" if re.search(r"(\-|NEG)", s) else ""
+            return (abo + " " + rh).strip() if abo else s or None
+
+        def normalize_anormal_hb(x):
+            if not isinstance(x, str):
+                return None
+            s = x.upper().replace("İ", "I").strip()
+            # Hb varyantlarını tek forma getir
+            if re.search(r"HBS", s): return "HbS"
+            if re.search(r"HBC", s): return "HbC"
+            if re.search(r"HBA2|A2", s): return "HbA2↑"
+            if re.search(r"HBF", s): return "HbF↑"
+            if re.search(r"NORMAL", s): return "Normal"
+            if re.search(r"UNK|BILINM", s): return "Bilinmiyor"
+            return s
+
+        def normalize_talasemi(x):
+            if not isinstance(x, str):
+                return None
+            s = x.upper().replace("İ", "I").strip()
+            if re.search(r"TA[Iİ]SIY", s): return "Taşıyıcı"
+            if re.search(r"MINOR", s): return "Minor"
+            if re.search(r"MAJOR", s): return "Major"
+            if re.search(r"HETERO", s): return "Heterozigot"
+            if re.search(r"HOMO", s): return "Homozigot"
+            if re.search(r"NORMAL|NEG", s): return "Normal"
+            return s
+
+        # ====== Hangi fonksiyon kullanılacak? ====== #
+        if test_name == "Kan Grubu/":
+            cat_series = sub["TEST_DEGERI"].map(normalize_blood_group)
+        elif test_name == "Anormal Hb/":
+            cat_series = sub["TEST_DEGERI"].map(normalize_anormal_hb)
+        elif test_name == "Talasemi(HPLC) (A0)/":
+            cat_series = sub["TEST_DEGERI"].map(normalize_talasemi)
+        else:
+            cat_series = sub["TEST_DEGERI"].astype(str).str.strip()
+
+        sub_cat = sub.assign(__CAT__=cat_series)
+
+        # ====== Frekans ve cinsiyet kırılımı ====== #
+        freq_all = (
+            sub_cat["__CAT__"]
+            .value_counts(dropna=False)
+            .rename_axis("Kategori")
+            .to_frame("N")
+            .reset_index()
+        )
+        freq_all["%"] = (freq_all["N"] / freq_all["N"].sum() * 100).round(2)
+
+        freq_by_sex = (
+            sub_cat.pivot_table(index="__CAT__", columns="CINSIYET",
+                                values="PROTOKOL_NO", aggfunc="count", fill_value=0)
+            .astype(int).reset_index().rename(columns={"__CAT__": "Kategori"})
+        )
+
+        # ====== Ki-kare testi ====== #
+        chi2_msg = "Ki-kare uygulanamadı."
+        try:
+            from scipy.stats import chi2_contingency
+            cont = freq_by_sex.drop(columns=["Kategori"]).values
+            if cont.sum() > 0 and cont.shape[1] > 1:
+                chi2, p, dof, _ = chi2_contingency(cont)
+                chi2_msg = f"Chi-square: χ²={chi2:.2f}, df={dof}, p={p:.4g}"
+        except Exception as e:
+            chi2_msg = f"Hata: {e}"
+
+        tabs = st.tabs(["Frekans", "Cinsiyet Dağılımı", "İstatistik"])
+        with tabs[0]:
+            st.dataframe(freq_all, use_container_width=True)
+        with tabs[1]:
+            st.dataframe(freq_by_sex, use_container_width=True)
+        with tabs[2]:
+            st.info(chi2_msg)
+
+        results_rows.append({
+            "TETKIK_ISMI": test_name,
+            "N": int(freq_all["N"].sum()),
+            "Mean": None, "Median": None, "Std": None, "Min": None, "Q1": None, "Q3": None, "Max": None,
+            "Normalite": "—",
+            "Test": chi2_msg
+        })
+        continue  # Sayısal analize geçme
+
 
     # Tanımlayıcılar
     stats_overall = descr_stats_fast(sub["TEST_DEGERI"])

@@ -738,6 +738,14 @@ for test_name in selected_tests:
             .reset_index()
         )
         freq_all["%"] = (freq_all["N"] / freq_all["N"].sum() * 100).round(2)
+        # --- Sayısal kopya oluştur (virgül → nokta, boşlukları temizle) ---
+        sub = sub.copy()
+        sub["__VAL_NUM__"] = (
+            sub["TEST_DEGERI"].astype(str)
+            .str.replace(",", ".", regex=False)
+            .str.replace(" ", "", regex=False)
+        )
+        sub["__VAL_NUM__"] = pd.to_numeric(sub["__VAL_NUM__"], errors="coerce")        
 
         freq_by_sex = (
             sub_cat.pivot_table(index="__CAT__", columns="CINSIYET",

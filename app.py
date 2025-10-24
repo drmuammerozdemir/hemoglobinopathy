@@ -37,12 +37,27 @@ from concurrent.futures import ThreadPoolExecutor
 # ============== Ayarlar ============== #
 st.set_page_config(page_title="Tetkik Analiz — Optimize", layout="wide")
 REQ_COLS = ["PROTOKOL_NO", "TCKIMLIK_NO", "TETKIK_ISMI", "TEST_DEGERI", "CINSIYET"]
-# Standart kategorik tetkikler (metin sonucu üreten)
-CATEGORICAL_TESTS = {
-    "Kan Grubu/",
-    "Anormal Hb/",
-    "Talasemi(HPLC) (A0)/",
+# --- Kategorik testler ---
+CATEGORICAL_TESTS = {"Kan Grubu/", "Anormal Hb/", "Talasemi(HPLC) (A0)/"}
+
+# --- Erişkin pozitiflik eşikleri (TETKIK_ISMI anahtarları) ---
+THRESHOLDS = {
+    # HbA2
+    "HbA2 (%)": (">=", 3.5),
+    "A2/":      (">=", 3.5),   # sizin isimlendirme
+    # HbF
+    "HbF (%)":  (">",  2.0),
+    "F/":       (">",  2.0),
+    # Varyant yüzdeleri
+    "HbS (%)":  (">",  0.0),
+    "HbC (%)":  (">",  0.0),
+    "HbD (%)":  (">",  0.0),
+    "HbE (%)":  (">",  0.0),
 }
+
+# İsteğe bağlı: yalnızca >0 filtresini varsayılan açık yapmak istediğin test adları
+GT_ZERO_DEFAULT = {"HbS (%)","HbC (%)","HbD (%)","HbE (%)","HbF (%)","HbA2 (%)","A2/","F/"}
+
 # >0 ise "pozitif" sayılacak varyant yüzdeleri (ihtiyacına göre genişlet)
 VARIANT_NUMERIC_TESTS = {
     "HbS (%)", "HbC (%)", "HbD (%)", "HbE (%)",

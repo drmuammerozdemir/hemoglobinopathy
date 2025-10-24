@@ -260,6 +260,200 @@ if chosen_files:
 if selected_tests:
     work = work[work["TETKIK_ISMI"].astype(str).isin(selected_tests)]
 
+# ================= VARYANT ÖZETLERİ (Anormal Hb / Talasemi HPLC) ================= #
+# Bu blok iki tablo üretir:
+# 1) "♀/♂ Mean±SD" : Seçilen varyant için Female/Male özet tablosu (Mean ± SD + ref aralığı)
+# 2) "Varyant Matrisi": Sütunlarda varyantlar, satırlarda parametreler (sayı değerleri = mean)
+
+import re
+import pandas as pd
+import numpy as np
+import streamlit as st
+
+# --- Yardımcı: sayısal dönüşüm (dataset'te zaten varsa onu kullanır)
+def _num(s):
+    return pd.to_numeric(
+        str(s).replace(",", ".").replace(" ", ""),
+        errors="coerce"
+    )
+
+# --- Normalizasyon fonksiyonları (Anormal Hb / HPLC için) ---
+def normalize_anormal_hb(x: str):
+    if x is None: return None
+    s = str(x).upper().replace("İ","I").strip()
+    if re.search(r"\bHBS\b", s): return "HbS"
+    if re.search(r"\bHBC\b", s): return "HbC"
+    if re.search(r"\bHBD\b", s): return "HbD"
+    if re.search(r"\bHBE\b", s): return "HbE"
+    if re.search(r"DELTA ?BETA|Δβ|DBETA", s): return "δβ-thal"
+    if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
+    if re.search(r"F\b", s): return "HbF↑"
+    if re.search(r"A2|HBA2", s): return "HbA2↑"
+    if re.search(r"NORMAL|NEG", s): return "Normal"
+    return s or None
+
+def normalize_talasemi(x: str):
+    if x is None: return None
+    s = str(x).upper().replace("İ","I").strip()
+    if re.search(r"MAJOR", s): return "Major"
+    if re.search(r"MINOR", s): return "Minor"
+    if re.search(r"TA[IS]IY", s): return "Taşıyıcı"
+    if re.search(r"HETERO", s): return "Heterozigot"
+    if re.search(r"HOMO", s): return "Homozigot"
+    if re.search(r"NORMAL|NEG", s): return "Normal"
+    return s or None
+
+# --- 1) Varyant etiketi üret (aynı PROTOKOL_NO içindeki bulgulardan tek etiket) ---
+variant_rows = work[
+    work["TETKIK_ISMI"].isin(["Anormal Hb/", "Talasemi(HPLC) (A0)/"])
+].copy()
+
+def _pick_variant(g):
+    # Öncelik sırası (patolojik olanlar önce)
+    priority = ["HbS","HbC","HbD","HbE","Hb S-β-thal","δβ-thal",
+                "Major","Minor","Taşıyıcı","Heterozigot","Homozigot",
+                "HbA2↑","HbF↑","Normal"]
+    tags = []
+    for _, r in g.iterrows():
+        val = str(r["TEST_DEGERI"])
+        if r["TETKIK_ISMI"] == "Anormal Hb/":
+            v = normalize_anormal_hb(val)
+        else:
+            v = normalize_talasemi(val)
+        if v: tags.append(v)
+    if not tags: return None
+    # önceliğe göre seç
+    for p in priority:
+        if p in tags: return p
+    return tags[0]
+
+if not variant_rows.empty:
+    var_map = (variant_rows
+               .groupby("PROTOKOL_NO")
+               .apply(_pick_variant)
+               .rename("VARIANT")
+               .reset_index())
+    work = work.merge(var_map, on="PROTOKOL_NO", how="left")
+else:
+    work["VARIANT"] = None
+
+# --- Analiz edilecek parametre eşlemesi (TETKIK_ISMI → görünür ad) ---
+PARAMS = {
+    "Hemogram/HGB": "Hb (g/dL)",
+    "Hemogram/HCT": "HCT (%)",
+    "Hemogram/RBC": "RBC (×10⁶)",
+    "Hemogram/RDW": "RDW (%)",
+    "Hemogram/MCV": "MCV (fL)",
+    "Hemogram/MCH": "MCH (pg)",
+    "Hemogram/MCHC": "MCHC (g/dL)",
+    "Talasemi(HPLC) (A0)/": "HbA0/HPLC*",
+    "HbA": "HbA (%)",
+    "HbA2": "HbA₂ (%)",
+    "HbF": "Hb F (%)",
+    "Anormal Hb/": "Variant (%)"
+}
+# (Not: HbA, HbA2, HbF için TETKIK_ISMI adların datasetinde nasıl geçtiğine göre yukarıyı düzenleyebilirsin.)
+
+REFS = {
+    "Hb (g/dL)": "F: 11–15; M: 12–17",
+    "HCT (%)":   "F: 36–46; M: 40–53",
+    "RBC (×10⁶)": "F: 3.9–5.6; M: 4.5–6.0",
+    "RDW (%)":   "11–16",
+    "MCV (fL)":  "80–100",
+    "MCH (pg)":  "27–34",
+    "MCHC (g/dL)": "32–36",
+    "HbA (%)":   "94–98",
+    "HbA₂ (%)":  "2–3.5",
+    "Hb F (%)":  "0–2",
+}
+
+# --- Yardımcı: belli parametrenin numeric serisini getir ---
+def get_param_series(df, tetkik_key):
+    s = df.loc[df["TETKIK_ISMI"] == tetkik_key, "TEST_DEGERI"]
+    return s.astype(str).map(_num)
+
+# ============ TABLO #1: Seçilen VARYANT için Female / Male Mean±SD ============ #
+st.header("📋 Varyant Özet Tablosu — ♀/♂ Mean ± SD")
+variant_opts = ["(Tümü)"] + sorted([v for v in work["VARIANT"].dropna().unique()])
+v_choice = st.selectbox("Varyant seç:", variant_opts, index=0)
+
+base = work.copy()
+if v_choice != "(Tümü)":
+    base = base[base["VARIANT"] == v_choice]
+
+def _mean_sd_str(x):
+    x = pd.to_numeric(x, errors="coerce").dropna()
+    return "—" if x.empty else f"{x.mean():.2f} ± {x.std(ddof=1):.2f}"
+
+rows_fm = []
+for tetkik_key, display_name in PARAMS.items():
+    # sadece mevcut olanları yaz
+    s_all = base.loc[base["TETKIK_ISMI"] == tetkik_key, ["TEST_DEGERI", "CINSIYET"]]
+    if s_all.empty: 
+        continue
+    s_all["val"] = s_all["TEST_DEGERI"].astype(str).map(_num)
+    f = s_all.loc[s_all["CINSIYET"].astype(str).str.lower().str.startswith(("k","f")), "val"]
+    m = s_all.loc[s_all["CINSIYET"].astype(str).str.lower().str.startswith(("e","m")), "val"]
+    rows_fm.append({
+        "Parameter": display_name,
+        "Female (Mean ± SD)": _mean_sd_str(f),
+        "Male (Mean ± SD)": _mean_sd_str(m),
+        "Reference range": REFS.get(display_name, "—")
+    })
+
+table_fm = pd.DataFrame(rows_fm)
+st.dataframe(table_fm, use_container_width=True)
+st.download_button("⬇️ Tablo #1 (CSV)", data=table_fm.to_csv(index=False).encode("utf-8-sig"),
+                   file_name="varyant_ozet_female_male.csv", mime="text/csv")
+
+# ============ TABLO #2: VARYANT MATRİSİ (Sütun = Varyant, Satır = Parametre) ============ #
+st.header("📊 Varyant Matrisi — Parametre Ortalamaları")
+
+# Hangi varyantlar sütun olsun?
+variant_cols = sorted([v for v in work["VARIANT"].dropna().unique()])
+if not variant_cols:
+    st.info("Varyant etiketi bulunamadı (Anormal Hb / Talasemi HPLC satırları yok).")
+else:
+    # Satırları oluştur
+    matrix_rows = []
+    for tetkik_key, display_name in PARAMS.items():
+        # Her varyant için mean hesapla
+        row = {"Parameter": display_name}
+        any_present = False
+        for v in variant_cols:
+            dfv = work[(work["VARIANT"] == v) & (work["TETKIK_ISMI"] == tetkik_key)]
+            if not dfv.empty:
+                vals = dfv["TEST_DEGERI"].astype(str).map(_num).dropna()
+                row[v] = round(vals.mean(), 2) if not vals.empty else np.nan
+                any_present = True
+            else:
+                row[v] = np.nan
+        if any_present:
+            matrix_rows.append(row)
+
+    # F/M sayısını ayrı satır olarak ekle
+    fm_row = {"Parameter": "Gender (F/M)"}
+    for v in variant_cols:
+        sub_v = work[work["VARIANT"] == v]
+        f = (sub_v["CINSIYET"].astype(str).str.lower().str.startswith(("k","f"))).sum()
+        m = (sub_v["CINSIYET"].astype(str).str.lower().str.startswith(("e","m"))).sum()
+        fm_row[v] = f"{f}/{m}"
+    matrix_rows.insert(0, fm_row)
+
+    # Yaş varsa (AGE/YAS) onu da ekle (opsiyonel; yoksa atlanır)
+    if "AGE" in work.columns or "YAS" in work.columns:
+        age_col = "AGE" if "AGE" in work.columns else "YAS"
+        age_row = {"Parameter": "Age (years)"}
+        for v in variant_cols:
+            vals = pd.to_numeric(work.loc[work["VARIANT"] == v, age_col], errors="coerce").dropna()
+            age_row[v] = round(vals.mean(), 2) if not vals.empty else np.nan
+        matrix_rows.insert(1, age_row)
+
+    table_var = pd.DataFrame(matrix_rows)
+    st.dataframe(table_var, use_container_width=True)
+    st.download_button("⬇️ Tablo #2 (CSV)", data=table_var.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="varyant_matrisi.csv", mime="text/csv")
+
 # ================= Ön-izleme & Müdahale: Metinden Sayıya ================= #
 import re
 import numpy as np

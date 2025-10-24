@@ -685,41 +685,136 @@ results_rows = []
 
 for test_name in selected_tests:
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
-    # __VAL_NUM__ kesin olsun (KeyError fix)
-    sub = add_numeric_copy(sub)
     if sub.empty:
         continue
 
+    # sayısal kopya hazırla
+    sub = add_numeric_copy(sub)
+
     st.subheader(f"🧷 {test_name}")
-        # --- Kategorik mi? ---
-    is_categorical = test_name in CATEGORICAL_TESTS
+
+    # --- KATEGORİK Mİ? (yalnızca bu dalda frekans / ki-kare yapılır) ---
+    is_categorical = (test_name in CATEGORICAL_TESTS)
     if not is_categorical:
-        vals = sub["TEST_DEGERI"].astype(str)
-        num_ok = pd.to_numeric(vals.str.replace(",", ".", regex=False), errors="coerce").notna().mean()
-        if num_ok < 0.6:
+        # veri temelli kontrol (çok temkinli eşik)
+        num_ratio = sub["__VAL_NUM__"].notna().mean()
+        if num_ratio < 0.3:
             is_categorical = True
 
     if is_categorical:
-        st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi yapılacak).")
-    # ----- VARYANT POZİTİF FİLTRESİ: sadece >0 değerler dahil olsun -----
-    positive_only = st.checkbox(
-        f"‘{test_name}’ için sadece > 0 değerleri dahil et (varyant-pozitif filtre)",
-        value=(test_name in VARIANT_NUMERIC_TESTS),
-        key=f"pos_only_{test_name}"
+        st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi).")
+        # Basit kategorik frekans
+        freq_all = (sub["TEST_DEGERI"].astype(str).str.strip()
+                    .value_counts(dropna=False).rename_axis("Kategori")
+                    .to_frame("N").reset_index())
+        freq_all["%"] = (freq_all["N"] / freq_all["N"].sum() * 100).round(2)
+
+        freq_by_sex = (sub.pivot_table(index="TEST_DEGERI", columns="CINSIYET",
+                                       values="PROTOKOL_NO", aggfunc="count", fill_value=0)
+                       .astype(int).reset_index().rename(columns={"TEST_DEGERI":"Kategori"}))
+
+        chi2_msg = "Ki-kare uygulanamadı."
+        try:
+            from scipy.stats import chi2_contingency
+            cont = freq_by_sex.drop(columns=["Kategori"]).values
+            if cont.sum() > 0 and cont.shape[1] > 1:
+                chi2, p, dof, _ = chi2_contingency(cont)
+                chi2_msg = f"Chi-square: χ²={chi2:.2f}, df={dof}, p={p:.4g}"
+        except Exception as e:
+            chi2_msg = f"Hata: {e}"
+
+        tabs = st.tabs(["Frekans", "Cinsiyet Dağılımı", "İstatistik"])
+        with tabs[0]: st.dataframe(freq_all, use_container_width=True)
+        with tabs[1]: st.dataframe(freq_by_sex, use_container_width=True)
+        with tabs[2]: st.info(chi2_msg)
+
+        results_rows.append({
+            "TETKIK_ISMI": test_name, "N": int(freq_all["N"].sum()),
+            "Mean": None, "Median": None, "Std": None, "Min": None, "Q1": None, "Q3": None, "Max": None,
+            "Normalite": "—", "Test": chi2_msg
+        })
+        continue  # sayısal analize girme
+
+    # --- SAYISAL ANALİZ (tek veri çerçevesi: sub_work) ---
+    # 1) Ayarlar: eşik ve/veya >0
+    use_threshold = st.checkbox(
+        f"‘{test_name}’ için erişkin eşiğini uygula",
+        value=(test_name in THRESHOLDS),
+        key=f"th_{test_name}"
+    )
+    use_gt_zero  = st.checkbox(
+        f"‘{test_name}’ için sadece > 0 değerleri dahil et",
+        value=(test_name in GT_ZERO_DEFAULT),
+        key=f"gt0_{test_name}"
     )
 
-    sub_num = sub.copy()
-    sub_num["__VAL_NUM__"] = (
-        sub_num["TEST_DEGERI"].astype(str)
-        .str.replace(",", ".", regex=False)
-        .str.replace(" ", "", regex=False)
-    )
-    sub_num["__VAL_NUM__"] = pd.to_numeric(sub_num["__VAL_NUM__"], errors="coerce")
+    # 2) Filtreleme
+    sub_work = sub[sub["__VAL_NUM__"].notna()].copy()
+    if use_threshold and test_name in THRESHOLDS:
+        sub_work = sub_work[apply_threshold(sub_work["__VAL_NUM__"], THRESHOLDS[test_name])]
+        st.caption(f"Eşik: {THRESHOLDS[test_name][0]} {THRESHOLDS[test_name][1]}")
+    elif use_gt_zero:
+        sub_work = sub_work[sub_work["__VAL_NUM__"] > 0]
+        st.caption("Filtre: > 0")
 
-    if positive_only:
-        sub_num = sub_num[sub_num["__VAL_NUM__"] > 0]
-        if sub_num.empty:
-            st.warning("Bu tetkikte (>0) pozitif satır bulunamadı.")
+    if sub_work.empty:
+        st.warning("Filtre sonrası satır bulunamadı.")
+        continue
+
+    # 3) İstatistikler (TAMAMI sub_work üzerinde!)
+    stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
+    normal_flag   = normality_flag(sub_work["__VAL_NUM__"])
+
+    by_sex = (sub_work.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
+              .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
+
+    by_file = (sub_work.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
+               .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
+
+    msg, test_info = nonparametric_test_by_group(sub_work.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", "CINSIYET")
+
+    results_rows.append({
+        "TETKIK_ISMI": test_name,
+        "N": stats_overall["count"],
+        "Mean": stats_overall["mean"],
+        "Median": stats_overall["median"],
+        "Std": stats_overall["std"],
+        "Min": stats_overall["min"],
+        "Q1": stats_overall["q1"],
+        "Q3": stats_overall["q3"],
+        "Max": stats_overall["max"],
+        "Normalite": normal_flag,
+        "Test": msg
+    })
+
+    tabs = st.tabs(["Tanımlayıcı", "Cinsiyet", "Dosya", "İstatistiksel Test", "Histogram", "Boxplot"])
+    with tabs[0]:
+        st.table(pd.DataFrame([stats_overall]))
+    with tabs[1]:
+        st.dataframe(by_sex, use_container_width=True)
+    with tabs[2]:
+        st.dataframe(by_file, use_container_width=True)
+    with tabs[3]:
+        st.info(msg)
+    with tabs[4]:
+        if st.checkbox(f"Histogram göster ({test_name})", value=False):
+            make_hist(sub_work.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", bins=30, title=f"{test_name} - Histogram")
+    with tabs[5]:
+        if st.checkbox(f"Boxplot göster ({test_name})", value=False):
+            make_boxplot(sub_work, "CINSIYET", "__VAL_NUM__", title=f"{test_name} - Cinsiyete Göre Boxplot")
+
+    # 4) Pozitif liste (filtre sonrası)
+    pos_cols = ["PROTOKOL_NO", "TCKIMLIK_NO", "CINSIYET", "SOURCE_FILE"]
+    pos_cols = [c for c in pos_cols if c in sub_work.columns]
+    pos_tbl = sub_work[pos_cols + ["__VAL_NUM__"]].sort_values("__VAL_NUM__", ascending=False)
+    st.write("**Filtre sonrası kayıtlar**")
+    st.dataframe(pos_tbl, use_container_width=True)
+    st.download_button(
+        "⬇️ TCKIMLIK_NO listesi (CSV)",
+        data=pos_tbl.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"{test_name}_filtre_sonrasi.csv",
+        mime="text/csv"
+    )
 
         # ====== Normalizasyon Fonksiyonları ====== #
         import re

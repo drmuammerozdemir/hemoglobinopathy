@@ -344,6 +344,11 @@ def norm_anormal_hb(x: str):
 
 # PROTOKOL_NO bazında VARIANT_TAG üret
 def pick_variant_tag(g: pd.DataFrame) -> str | None:
+    # --- GÜVENCE: sayısal kopya + string kolonlar ---
+    g = g.copy()
+    g = add_numeric_copy(g)  # __VAL_NUM__ yoksa oluştur
+    g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
+
     tags = []
 
     # 1) “Anormal Hb/” metinleri
@@ -351,18 +356,22 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     tags.extend([t for t in (norm_anormal_hb(v) for v in txt) if t])
 
     # 2) HbA2 eşiği (erişkin)
-    a2_vals = g[g["TETKIK_ISMI"].isin(A2_KEYS)]["__VAL_NUM__"].dropna()
-    if not a2_vals.empty and a2_vals.max() >= 3.5:
-        tags.append("HbA2↑")
+    a2_mask = g["TETKIK_ISMI"].isin(A2_KEYS)
+    if a2_mask.any():
+        a2_vals = g.loc[a2_mask, "__VAL_NUM__"].dropna()
+        if not a2_vals.empty and a2_vals.max() >= 3.5:
+            tags.append("HbA2↑")
 
     # 3) HbF eşiği (erişkin)
-    f_vals = g[g["TETKIK_ISMI"].isin(F_KEYS)]["__VAL_NUM__"].dropna()
-    if not f_vals.empty and f_vals.max() > 2.0:
-        tags.append("HbF↑")
+    f_mask = g["TETKIK_ISMI"].isin(F_KEYS)
+    if f_mask.any():
+        f_vals = g.loc[f_mask, "__VAL_NUM__"].dropna()
+        if not f_vals.empty and (f_vals.max() > 2.0):
+            tags.append("HbF↑")
 
-    # 4) HbS/HbC/HbD/HbE yüzde kolonlarını yakala (>0 ise etiketle)
+    # 4) HbS/HbC/HbD/HbE yüzde testleri (>0 ise etiketle)
     for var_name, pat in VARIANT_NUMERIC_PATTERNS.items():
-        mask = g["TETKIK_ISMI"].astype(str).str.match(pat)
+        mask = g["TETKIK_ISMI"].str.match(pat, na=False)
         if mask.any():
             vals = g.loc[mask, "__VAL_NUM__"].dropna()
             if not vals.empty and (vals > 0).any():
@@ -371,7 +380,6 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     if not tags:
         return None
 
-    # Öncelik: patolojik önce
     priority = ["Hb S-β-thal", "HbS", "HbC", "HbD", "HbE", "HbA2↑", "HbF↑", "Normal"]
     for p in priority:
         if p in tags:
@@ -380,9 +388,14 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
 
 
 if "VARIANT_TAG" not in work.columns:
-    var_map = (work.groupby("PROTOKOL_NO", as_index=False)
-                  .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)})))
+    # __VAL_NUM__ güvence (tüm work üzerinde)
+    work = add_numeric_copy(work)
+
+    var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
+                  .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
+                  .reset_index())
     work = work.merge(var_map, on="PROTOKOL_NO", how="left")
+
 
 # Kullanıcı arayüzü
 st.header("📋 Varyant Özeti — erişkin eşikleri ile")

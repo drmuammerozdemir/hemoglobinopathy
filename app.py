@@ -693,17 +693,17 @@ for test_name in selected_tests:
 
     st.subheader(f"🧷 {test_name}")
 
-    # --- KATEGORİK Mİ? (yalnızca bu dalda frekans / ki-kare yapılır) ---
+    # --- KATEGORİK Mİ? ---
     is_categorical = (test_name in CATEGORICAL_TESTS)
     if not is_categorical:
-        # veri temelli kontrol (çok temkinli eşik)
+        # veri temelli kontrol (sayısal oranı çok düşükse kategorik say)
         num_ratio = sub["__VAL_NUM__"].notna().mean()
         if num_ratio < 0.3:
             is_categorical = True
 
     if is_categorical:
         st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi).")
-        # Basit kategorik frekans
+
         freq_all = (sub["TEST_DEGERI"].astype(str).str.strip()
                     .value_counts(dropna=False).rename_axis("Kategori")
                     .to_frame("N").reset_index())
@@ -733,10 +733,9 @@ for test_name in selected_tests:
             "Mean": None, "Median": None, "Std": None, "Min": None, "Q1": None, "Q3": None, "Max": None,
             "Normalite": "—", "Test": chi2_msg
         })
-        continue  # sayısal analize girme
+        continue  # sayısal kola girme
 
-    # --- SAYISAL ANALİZ (tek veri çerçevesi: sub_work) ---
-    # 1) Ayarlar: eşik ve/veya >0
+    # --- SAYISAL ANALİZ (tek çerçeve: sub_work) ---
     use_threshold = st.checkbox(
         f"‘{test_name}’ için erişkin eşiğini uygula",
         value=(test_name in THRESHOLDS),
@@ -748,7 +747,6 @@ for test_name in selected_tests:
         key=f"gt0_{test_name}"
     )
 
-    # 2) Filtreleme
     sub_work = sub[sub["__VAL_NUM__"].notna()].copy()
     if use_threshold and test_name in THRESHOLDS:
         sub_work = sub_work[apply_threshold(sub_work["__VAL_NUM__"], THRESHOLDS[test_name])]
@@ -761,17 +759,20 @@ for test_name in selected_tests:
         st.warning("Filtre sonrası satır bulunamadı.")
         continue
 
-    # 3) İstatistikler (TAMAMI sub_work üzerinde!)
+    # Tanımlayıcılar
     stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
     normal_flag   = normality_flag(sub_work["__VAL_NUM__"])
 
+    # Cinsiyet / Dosya kırılımları
     by_sex = (sub_work.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
               .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
 
     by_file = (sub_work.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
 
-    msg, test_info = nonparametric_test_by_group(sub_work.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", "CINSIYET")
+    # Nonparametrik test
+    _msg_df = sub_work.rename(columns={"__VAL_NUM__": "VAL"})
+    msg, test_info = nonparametric_test_by_group(_msg_df, "VAL", "CINSIYET")
 
     results_rows.append({
         "TETKIK_ISMI": test_name,
@@ -787,23 +788,20 @@ for test_name in selected_tests:
         "Test": msg
     })
 
+    # Sekmeler
     tabs = st.tabs(["Tanımlayıcı", "Cinsiyet", "Dosya", "İstatistiksel Test", "Histogram", "Boxplot"])
-    with tabs[0]:
-        st.table(pd.DataFrame([stats_overall]))
-    with tabs[1]:
-        st.dataframe(by_sex, use_container_width=True)
-    with tabs[2]:
-        st.dataframe(by_file, use_container_width=True)
-    with tabs[3]:
-        st.info(msg)
+    with tabs[0]: st.table(pd.DataFrame([stats_overall]))
+    with tabs[1]: st.dataframe(by_sex, use_container_width=True)
+    with tabs[2]: st.dataframe(by_file, use_container_width=True)
+    with tabs[3]: st.info(msg)
     with tabs[4]:
         if st.checkbox(f"Histogram göster ({test_name})", value=False):
-            make_hist(sub_work.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", bins=30, title=f"{test_name} - Histogram")
+            make_hist(_msg_df, "VAL", bins=30, title=f"{test_name} - Histogram")
     with tabs[5]:
         if st.checkbox(f"Boxplot göster ({test_name})", value=False):
             make_boxplot(sub_work, "CINSIYET", "__VAL_NUM__", title=f"{test_name} - Cinsiyete Göre Boxplot")
 
-    # 4) Pozitif liste (filtre sonrası)
+    # Pozitif (filtre sonrası) liste
     pos_cols = ["PROTOKOL_NO", "TCKIMLIK_NO", "CINSIYET", "SOURCE_FILE"]
     pos_cols = [c for c in pos_cols if c in sub_work.columns]
     pos_tbl = sub_work[pos_cols + ["__VAL_NUM__"]].sort_values("__VAL_NUM__", ascending=False)
@@ -816,148 +814,6 @@ for test_name in selected_tests:
         mime="text/csv"
     )
 
-        # ====== Normalizasyon Fonksiyonları ====== #
-        import re
-
-        def normalize_blood_group(x):
-            if not isinstance(x, str):
-                return None
-            s = x.upper().replace("İ", "I").strip()
-            abo = None
-            if re.search(r"\bAB\b", s): abo = "AB"
-            elif re.search(r"\bA\b", s): abo = "A"
-            elif re.search(r"\bB\b", s): abo = "B"
-            elif re.search(r"\b0\b|\bO\b", s): abo = "O"
-            rh = "Rh(+)" if re.search(r"(\+|POS|POZ|RH\+)", s) else "Rh(-)" if re.search(r"(\-|NEG)", s) else ""
-            return (abo + " " + rh).strip() if abo else s or None
-
-        def normalize_anormal_hb(x):
-            if not isinstance(x, str):
-                return None
-            s = x.upper().replace("İ", "I").strip()
-            # Hb varyantlarını tek forma getir
-            if re.search(r"HBS", s): return "HbS"
-            if re.search(r"HBC", s): return "HbC"
-            if re.search(r"HBA2|A2", s): return "HbA2↑"
-            if re.search(r"HBF", s): return "HbF↑"
-            if re.search(r"NORMAL", s): return "Normal"
-            if re.search(r"UNK|BILINM", s): return "Bilinmiyor"
-            return s
-
-        def normalize_talasemi(x):
-            if not isinstance(x, str):
-                return None
-            s = x.upper().replace("İ", "I").strip()
-            if re.search(r"TA[Iİ]SIY", s): return "Taşıyıcı"
-            if re.search(r"MINOR", s): return "Minor"
-            if re.search(r"MAJOR", s): return "Major"
-            if re.search(r"HETERO", s): return "Heterozigot"
-            if re.search(r"HOMO", s): return "Homozigot"
-            if re.search(r"NORMAL|NEG", s): return "Normal"
-            return s
-
-        # ====== Hangi fonksiyon kullanılacak? ====== #
-        if test_name == "Kan Grubu/":
-            cat_series = sub["TEST_DEGERI"].map(normalize_blood_group)
-        elif test_name == "Anormal Hb/":
-            cat_series = sub["TEST_DEGERI"].map(normalize_anormal_hb)
-        elif test_name == "Talasemi(HPLC) (A0)/":
-            cat_series = sub["TEST_DEGERI"].map(normalize_talasemi)
-        else:
-            cat_series = sub["TEST_DEGERI"].astype(str).str.strip()
-
-        sub_cat = sub.assign(__CAT__=cat_series)
-
-        # ====== Frekans ve cinsiyet kırılımı ====== #
-        freq_all = (
-            sub_cat["__CAT__"]
-            .value_counts(dropna=False)
-            .rename_axis("Kategori")
-            .to_frame("N")
-            .reset_index()
-        )
-        freq_all["%"] = (freq_all["N"] / freq_all["N"].sum() * 100).round(2)
-
-        freq_by_sex = (
-            sub_cat.pivot_table(index="__CAT__", columns="CINSIYET",
-                                values="PROTOKOL_NO", aggfunc="count", fill_value=0)
-            .astype(int).reset_index().rename(columns={"__CAT__": "Kategori"})
-        )
-
-        # ====== Ki-kare testi ====== #
-        chi2_msg = "Ki-kare uygulanamadı."
-        try:
-            from scipy.stats import chi2_contingency
-            cont = freq_by_sex.drop(columns=["Kategori"]).values
-            if cont.sum() > 0 and cont.shape[1] > 1:
-                chi2, p, dof, _ = chi2_contingency(cont)
-                chi2_msg = f"Chi-square: χ²={chi2:.2f}, df={dof}, p={p:.4g}"
-        except Exception as e:
-            chi2_msg = f"Hata: {e}"
-
-        tabs = st.tabs(["Frekans", "Cinsiyet Dağılımı", "İstatistik"])
-        with tabs[0]:
-            st.dataframe(freq_all, use_container_width=True)
-        with tabs[1]:
-            st.dataframe(freq_by_sex, use_container_width=True)
-        with tabs[2]:
-            st.info(chi2_msg)
-
-        results_rows.append({
-            "TETKIK_ISMI": test_name,
-            "N": int(freq_all["N"].sum()),
-            "Mean": None, "Median": None, "Std": None, "Min": None, "Q1": None, "Q3": None, "Max": None,
-            "Normalite": "—",
-            "Test": chi2_msg
-        })
-        continue  # Sayısal analize geçme
-
-
-    # Tanımlayıcılar
-    stats_overall = descr_stats_fast(sub_num["__VAL_NUM__"])
-    normal_flag = normality_flag(sub["TEST_DEGERI"])
-
-    # Cinsiyet kırılımı (vektörize)
-    by_sex = (sub.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
-              .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
-
-    # Dosya kırılımı (vektörize)
-    by_file = (sub.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
-               .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
-
-    # Test
-    msg, test_info = nonparametric_test_by_group(sub_num.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", "CINSIYET")
-
-    results_rows.append({
-        "TETKIK_ISMI": test_name,
-        "N": stats_overall["count"],
-        "Mean": stats_overall["mean"],
-        "Median": stats_overall["median"],
-        "Std": stats_overall["std"],
-        "Min": stats_overall["min"],
-        "Q1": stats_overall["q1"],
-        "Q3": stats_overall["q3"],
-        "Max": stats_overall["max"],
-        "Normalite": normal_flag,
-        "Test": msg
-    })
-
-    # Sekmeler; grafikler isteğe bağlı
-    tabs = st.tabs(["Tanımlayıcı", "Cinsiyet", "Dosya", "İstatistiksel Test", "Histogram", "Boxplot"])
-    with tabs[0]:
-        st.table(pd.DataFrame([stats_overall]))
-    with tabs[1]:
-        st.dataframe(by_sex, use_container_width=True)
-    with tabs[2]:
-        st.dataframe(by_file, use_container_width=True)
-    with tabs[3]:
-        st.info(msg)
-    with tabs[4]:
-        if st.checkbox(f"Histogram göster ({test_name})", value=False):
-            make_hist(sub_num.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", bins=30, title=f"{test_name} - Histogram")
-    with tabs[5]:
-        if st.checkbox(f"Boxplot göster ({test_name})", value=False):
-            make_boxplot(sub_num, "CINSIYET", "__VAL_NUM__", title=f"{test_name} - Cinsiyete Göre Boxplot")
 
 # Toplu özet
 if results_rows:

@@ -775,19 +775,19 @@ for test_name in selected_tests:
 
 
     # Tanımlayıcılar
-    stats_overall = descr_stats_fast(sub["TEST_DEGERI"])
+    stats_overall = descr_stats_fast(sub_num["__VAL_NUM__"])
     normal_flag = normality_flag(sub["TEST_DEGERI"])
 
     # Cinsiyet kırılımı (vektörize)
-    by_sex = (sub.groupby("CINSIYET", dropna=False)["TEST_DEGERI"]
+    by_sex = (sub.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
               .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
 
     # Dosya kırılımı (vektörize)
-    by_file = (sub.groupby("SOURCE_FILE", dropna=False)["TEST_DEGERI"]
+    by_file = (sub.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
 
     # Test
-    msg, test_info = nonparametric_test_by_group(sub, "TEST_DEGERI", "CINSIYET")
+    msg, test_info = nonparametric_test_by_group(sub_num.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", "CINSIYET")
 
     results_rows.append({
         "TETKIK_ISMI": test_name,
@@ -815,10 +815,10 @@ for test_name in selected_tests:
         st.info(msg)
     with tabs[4]:
         if st.checkbox(f"Histogram göster ({test_name})", value=False):
-            make_hist(sub, "TEST_DEGERI", bins=30, title=f"{test_name} - Histogram")
+            make_hist(sub_num.rename(columns={"__VAL_NUM__":"VAL"}), "VAL", bins=30, title=f"{test_name} - Histogram")
     with tabs[5]:
         if st.checkbox(f"Boxplot göster ({test_name})", value=False):
-            make_boxplot(sub, "CINSIYET", "TEST_DEGERI", title=f"{test_name} - Cinsiyete Göre Boxplot")
+            make_boxplot(sub_num, "CINSIYET", "__VAL_NUM__", title=f"{test_name} - Cinsiyete Göre Boxplot")
 
 # Toplu özet
 if results_rows:

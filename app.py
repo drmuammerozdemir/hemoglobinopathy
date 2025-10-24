@@ -37,8 +37,10 @@ from concurrent.futures import ThreadPoolExecutor
 # ============== Ayarlar ============== #
 st.set_page_config(page_title="Tetkik Analiz — Optimize", layout="wide")
 REQ_COLS = ["PROTOKOL_NO", "TCKIMLIK_NO", "TETKIK_ISMI", "TEST_DEGERI", "CINSIYET"]
-# --- Kategorik testler ---
-CATEGORICAL_TESTS = {"Kan Grubu/", "Anormal Hb/", "Talasemi(HPLC) (A0)/"}
+# Kategorik (metin) testler
+# NOT: A0 HPLC bir % değerdir → KATEGORIK DEĞİL!
+CATEGORICAL_TESTS = {"Kan Grubu/", "Anormal Hb/"}
+
 
 # --- Erişkin pozitiflik eşikleri (TETKIK_ISMI anahtarları) ---
 THRESHOLDS = {
@@ -56,7 +58,11 @@ THRESHOLDS = {
 }
 
 # İsteğe bağlı: yalnızca >0 filtresini varsayılan açık yapmak istediğin test adları
-GT_ZERO_DEFAULT = {"HbS (%)","HbC (%)","HbD (%)","HbE (%)","HbF (%)","HbA2 (%)","A2/","F/"}
+GT_ZERO_DEFAULT = {
+    "HbS (%)","HbC (%)","HbD (%)","HbE (%)","HbF (%)","HbA2 (%)","A2/","F/",
+    "C/","D/","E/","S/"          # HPLC varyant pikleri
+}
+
 
 # >0 ise "pozitif" sayılacak varyant yüzdeleri (ihtiyacına göre genişlet)
 VARIANT_NUMERIC_TESTS = {
@@ -661,6 +667,88 @@ for test_name in selected_tests:
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
     if sub.empty:
         continue
+
+    # --- KATEGORİK TESTLER (Kan Grubu, Anormal Hb) ---
+    if test_name in {"Kan Grubu/", "Anormal Hb/"}:
+        st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi).")
+
+        import re
+        def normalize_blood_group(x):
+            if not isinstance(x, str): return None
+            s = x.upper().replace("İ","I").strip()
+            abo = None
+            if re.search(r"\bAB\b", s): abo = "AB"
+            elif re.search(r"\bA\b", s): abo = "A"
+            elif re.search(r"\bB\b", s): abo = "B"
+            elif re.search(r"\b0\b|\bO\b", s): abo = "O"
+            rh = "Rh(+)" if re.search(r"(\+|POS|POZ|RH\+)", s) else ("Rh(-)" if re.search(r"(\-|NEG)", s) else "")
+            return (abo + (" " + rh if rh else "")).strip() if abo else s
+
+        def normalize_anormal_hb_text(x):
+            if not isinstance(x, str): return None
+            s = x.upper().replace("İ","I").strip()
+            if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
+            if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
+            if re.search(r"\bHBC\b", s): return "HbC"
+            if re.search(r"\bHBD\b", s): return "HbD"
+            if re.search(r"\bHBE\b", s): return "HbE"
+            if re.search(r"\bA2\b|HBA2", s): return "HbA2↑"
+            if re.search(r"\bF\b|HBF", s): return "HbF↑"
+            if re.search(r"\bNORMAL\b|NEG", s): return "Normal"
+            return s or None
+
+        if test_name == "Kan Grubu/":
+            cat_series = sub["TEST_DEGERI"].map(normalize_blood_group)
+        else:
+            cat_series = sub["TEST_DEGERI"].map(normalize_anormal_hb_text)
+
+        sub_cat = sub.assign(__CAT__=cat_series)
+
+        # ---- Frekans tablosu ----
+        freq_all = (sub_cat["__CAT__"].value_counts(dropna=False)
+                    .rename_axis("Kategori").to_frame("N").reset_index())
+        total = int(freq_all["N"].sum()) if not freq_all.empty else 0
+        if total > 0:
+            freq_all["%"] = (freq_all["N"]/total*100).round(2)
+
+        freq_by_sex = (sub_cat.pivot_table(index="__CAT__", columns="CINSIYET",
+                                           values="PROTOKOL_NO", aggfunc="count", fill_value=0)
+                       .astype(int).reset_index().rename(columns={"__CAT__":"Kategori"}))
+
+        from scipy.stats import chi2_contingency
+        chi2_msg = "Ki-kare uygulanamadı."
+        try:
+            cont = freq_by_sex.drop(columns=["Kategori"]).values
+            if cont.sum() > 0 and cont.shape[1] > 1:
+                chi2, p, dof, _ = chi2_contingency(cont)
+                chi2_msg = f"Chi-square: χ²={chi2:.2f}, df={dof}, p={p:.4g}"
+        except Exception as e:
+            chi2_msg = f"Hata: {e}"
+
+        tabs = st.tabs(["Frekans", "Cinsiyet Dağılımı", "İstatistik", "Olgu Listesi"])
+        with tabs[0]:
+            st.dataframe(freq_all, use_container_width=True)
+        with tabs[1]:
+            st.dataframe(freq_by_sex, use_container_width=True)
+        with tabs[2]:
+            st.info(chi2_msg)
+        with tabs[3]:
+            keep = ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE"]
+            keep = [c for c in keep if c in sub_cat.columns]
+            case_tbl = sub_cat[keep + ["TEST_DEGERI","__CAT__"]].rename(columns={"__CAT__":"Kategori"})
+            st.dataframe(case_tbl, use_container_width=True)
+            st.download_button("⬇️ Olgu listesi (CSV)",
+                data=case_tbl.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{test_name}_olgu_listesi.csv", mime="text/csv")
+
+        results_rows.append({
+            "TETKIK_ISMI": test_name,
+            "N": int(freq_all["N"].sum()),
+            "Mean": None, "Median": None, "Std": None,
+            "Min": None, "Q1": None, "Q3": None, "Max": None,
+            "Normalite": "—", "Test": chi2_msg
+        })
+
 
     # sayısal kopya hazırla
     sub = add_numeric_copy(sub)

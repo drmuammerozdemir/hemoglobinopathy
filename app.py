@@ -125,25 +125,36 @@ def _resolve_patient_sex(series: pd.Series) -> str:
     return "Çakışma"
 
 
+# === PATCH: summarize_sex_counts (BAŞLA)
 def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
     tmp = frame[["TCKIMLIK_NO", "CINSIYET"]].copy()
-    tmp["__SEX_CANON__"] = tmp["CINSIYET"].map(normalize_sex_label)
+
+    # CINSIYET category olabilir; object'e çevir ve normalize et
+    tmp["CINSIYET"] = tmp["CINSIYET"].astype(str)
+    tmp["__SEX_CANON__"] = tmp["CINSIYET"].map(normalize_sex_label).astype(object)
+
+    # Güvenli doldurma (categorical değil → sorun yok)
+    s_rows = tmp["__SEX_CANON__"].where(tmp["__SEX_CANON__"].notna(), "Bilinmiyor")
 
     row_counts = (
-        tmp["__SEX_CANON__"].fillna("Bilinmiyor").value_counts(dropna=False)
+        s_rows.value_counts(dropna=False)
         .rename_axis("CINSIYET")
         .to_frame("Satır Sayısı")
     )
 
     with_id = tmp[tmp["TCKIMLIK_NO"].notna()].copy()
     if not with_id.empty:
+        # Hasta bazında cinsiyet çözümleme
+        w = with_id.copy()
+        w["__SEX_CANON__"] = w["__SEX_CANON__"].astype(object)
         patient_gender = (
-            with_id.groupby("TCKIMLIK_NO")["__SEX_CANON__"]
-            .apply(_resolve_patient_sex)
-            .reset_index(name="__SEX_RESOLVED__")
+            w.groupby("TCKIMLIK_NO")["__SEX_CANON__"]
+             .apply(lambda s: _resolve_patient_sex(pd.Series(pd.unique(s.dropna()))))
+             .reset_index(name="__SEX_RESOLVED__")
         )
         patient_counts = (
-            patient_gender["__SEX_RESOLVED__"].value_counts(dropna=False)
+            patient_gender["__SEX_RESOLVED__"].fillna("Bilinmiyor")
+            .value_counts(dropna=False)
             .rename_axis("CINSIYET")
             .to_frame("Hasta (Benzersiz)")
         )
@@ -152,32 +163,21 @@ def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
 
     summary = row_counts.join(patient_counts, how="outer").fillna(0)
     summary["Satır Sayısı"] = summary["Satır Sayısı"].astype(int)
-    summary["Hasta (Benzersiz)"] = summary["Hasta (Benzersiz)"].astype(int)
-
-    total_rows = summary["Satır Sayısı"].sum()
-    total_patients = summary["Hasta (Benzersiz)"].sum()
-
-    if total_rows:
-        summary["% Satır"] = (summary["Satır Sayısı"] / total_rows * 100).round(2)
+    if "Hasta (Benzersiz)" in summary.columns:
+        summary["Hasta (Benzersiz)"] = summary["Hasta (Benzersiz)"].astype(int)
     else:
-        summary["% Satır"] = np.nan
+        summary["Hasta (Benzersiz)"] = 0
 
-    if total_patients:
-        summary["% Hasta"] = (
-            summary["Hasta (Benzersiz)"] / total_patients * 100
-        ).round(2)
-    else:
-        summary["% Hasta"] = np.nan
+    total_rows = int(summary["Satır Sayısı"].sum())
+    total_patients = int(summary["Hasta (Benzersiz)"].sum())
+
+    summary["% Satır"] = (summary["Satır Sayısı"] / total_rows * 100).round(2) if total_rows else np.nan
+    summary["% Hasta"] = (summary["Hasta (Benzersiz)"] / total_patients * 100).round(2) if total_patients else np.nan
 
     summary = summary.reset_index()
-    summary = summary[[
-        "CINSIYET",
-        "Hasta (Benzersiz)",
-        "% Hasta",
-        "Satır Sayısı",
-        "% Satır",
-    ]]
+    summary = summary[["CINSIYET","Hasta (Benzersiz)","% Hasta","Satır Sayısı","% Satır"]]
     return summary.sort_values("Hasta (Benzersiz)", ascending=False).reset_index(drop=True)
+# === PATCH: summarize_sex_counts (BİTİR)
 
 def downcast_df(df: pd.DataFrame) -> pd.DataFrame:
     # PROTOKOL_NO, TCKIMLIK_NO sayıya dönmesin (ID olabilir), diğer uygun alanları küçült

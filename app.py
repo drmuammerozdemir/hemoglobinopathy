@@ -298,7 +298,7 @@ else:
 left, right = st.columns([3, 2])
 with left:
     unique_tests = sorted([str(x) for x in df["TETKIK_ISMI"].dropna().unique()])
-    default_pick = unique_tests[:5] if len(unique_tests) > 5 else unique_tests[:1]
+    default_pick = unique_tests
     selected_tests = st.multiselect("Analiz edilecek tetkikler", options=unique_tests, default=default_pick)
 with right:
     sexes = [str(x) for x in df["CINSIYET"].dropna().unique()]
@@ -315,82 +315,86 @@ if selected_tests:
     work = work[work["TETKIK_ISMI"].astype(str).isin(selected_tests)]
 
 # ================= VARYANT ÖZETLERİ (Anormal Hb / HPLC → Etiket + Özet) ================= #
+# === VARYANT ÖZETİ / ETİKETLEME === (BAŞLA)
 import re
 
-# Dosyanızdaki olası isimler (gerekirse genişletin)
-A2_KEYS = {"HbA2 (%)", "A2/", "HbA2", "Hb A2 (%)", "Hb A2"}
-F_KEYS  = {"HbF (%)", "F/", "HbF", "Hb F (%)", "Hb F"}
+# Güvence: numeric kopya olsun
+work = add_numeric_copy(work)
 
-# Olası varyant yüzde test adları (regex) – HbS/HbC/HbD/HbE sayısal kolonlarını da bulalım
-VARIANT_NUMERIC_PATTERNS = {
-    "HbS": re.compile(r"(?i)\bhb\s*s\b.*%|\bHbS\b.*%|^HbS ?\(%\)$"),
-    "HbC": re.compile(r"(?i)\bhb\s*c\b.*%|\bHbC\b.*%|^HbC ?\(%\)$"),
-    "HbD": re.compile(r"(?i)\bhb\s*d\b.*%|\bHbD\b.*%|^HbD ?\(%\)$"),
-    "HbE": re.compile(r"(?i)\bhb\s*e\b.*%|\bHbE\b.*%|^HbE ?\(%\)$"),
+# Erişkin eşik setleri
+A2_KEYS = {"A2/", "HbA2", "HbA2 (%)", "Hb A2", "Hb A2 (%)"}
+F_KEYS = {"F/", "HbF", "HbF (%)", "Hb F", "Hb F (%)"}
+
+# TETKIK_ISMI -> varyant adı (HPLC pikleri)
+NUMVAR_FROM_TEST = {
+    "C/": "HbC",
+    "D/": "HbD",
+    "E/": "HbE",
+    "S/": "HbS",
 }
 
-def norm_anormal_hb(x: str):
-    """Anormal Hb/ metninden etiket çıkar."""
-    if x is None: return None
-    s = str(x).upper().replace("İ","I").strip()
-    # S-β tal
-    if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
-    # HbS varyantı
-    if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
-    # HbC/D/E
-    if re.search(r"\bHBC\b", s): return "HbC"
-    if re.search(r"\bHBD\b", s): return "HbD"
-    if re.search(r"\bHBE\b", s): return "HbE"
-    # A2/F artışı
-    if re.search(r"\bA2\b|HBA2", s):   return "HbA2↑"
-    if re.search(r"\bF\b|HBF", s):     return "HbF↑"
-    # Normal ifadesi
-    if re.search(r"\bNORMAL\b|NEG", s):return "Normal"
+
+def norm_anormal_hb_text(x: str | None):
+    if not isinstance(x, str):
+        return None
+    s = x.upper().replace("İ", "I").strip()
+    if re.search(r"S-?BETA|S ?β", s):
+        return "Hb S-β-thal"
+    if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s):
+        return "HbS"
+    if re.search(r"\bHBC\b", s):
+        return "HbC"
+    if re.search(r"\bHBD\b", s):
+        return "HbD"
+    if re.search(r"\bHBE\b", s):
+        return "HbE"
+    if re.search(r"\bA2\b|HBA2", s):
+        return "HbA2↑"
+    if re.search(r"\bF\b|HBF", s):
+        return "HbF↑"
+    if re.search(r"\bNORMAL\b|NEG", s):
+        return "Normal"
     return None
 
-# PROTOKOL_NO bazında VARIANT_TAG üret
-def pick_variant_tag(g: pd.DataFrame) -> str | None:
-    # --- GÜVENCE: sayısal kopya + string kolonlar ---
-    g = g.copy()
-    g = add_numeric_copy(g)  # __VAL_NUM__ yoksa oluştur
-    g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
 
+def pick_variant_tag(g: pd.DataFrame) -> str | None:
+    g = add_numeric_copy(g.copy())
+    g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
     tags = []
 
-    # 1) “Anormal Hb/” metinleri
+    # 1) Anormal Hb/ metinlerinden
     txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
-    tags.extend([t for t in (norm_anormal_hb(v) for v in txt) if t])
+    for v in txt:
+        t = norm_anormal_hb_text(v)
+        if t:
+            tags.append(t)
 
-    # 2) HbA2 eşiği (erişkin)
-    a2_mask = g["TETKIK_ISMI"].isin(A2_KEYS)
-    if a2_mask.any():
-        a2_vals = g.loc[a2_mask, "__VAL_NUM__"].dropna()
-        if not a2_vals.empty and a2_vals.max() >= 3.5:
+    # 2) HbA2 ve HbF erişkin eşikleri
+    if g["TETKIK_ISMI"].isin(A2_KEYS).any():
+        a2 = g.loc[g["TETKIK_ISMI"].isin(A2_KEYS), "__VAL_NUM__"].dropna()
+        if not a2.empty and a2.max() >= 3.5:
             tags.append("HbA2↑")
-
-    # 3) HbF eşiği (erişkin)
-    f_mask = g["TETKIK_ISMI"].isin(F_KEYS)
-    if f_mask.any():
-        f_vals = g.loc[f_mask, "__VAL_NUM__"].dropna()
-        if not f_vals.empty and (f_vals.max() > 2.0):
+    if g["TETKIK_ISMI"].isin(F_KEYS).any():
+        f = g.loc[g["TETKIK_ISMI"].isin(F_KEYS), "__VAL_NUM__"].dropna()
+        if not f.empty and f.max() > 2.0:
             tags.append("HbF↑")
 
-    # 4) HbS/HbC/HbD/HbE yüzde testleri (>0 ise etiketle)
-    for var_name, pat in VARIANT_NUMERIC_PATTERNS.items():
-        mask = g["TETKIK_ISMI"].str.match(pat, na=False)
-        if mask.any():
-            vals = g.loc[mask, "__VAL_NUM__"].dropna()
-            if not vals.empty and (vals > 0).any():
+    # 3) HPLC pikleri (C/D/E/S) -> >0 varsa ilgili varyant
+    for k, var_name in NUMVAR_FROM_TEST.items():
+        m = g["TETKIK_ISMI"] == k
+        if m.any():
+            vv = g.loc[m, "__VAL_NUM__"].dropna()
+            if not vv.empty and (vv > 0).any():
                 tags.append(var_name)
 
     if not tags:
         return None
-
     priority = ["Hb S-β-thal", "HbS", "HbC", "HbD", "HbE", "HbA2↑", "HbF↑", "Normal"]
     for p in priority:
         if p in tags:
             return p
     return tags[0]
+# === VARYANT ÖZETİ / ETİKETLEME === (BİTİR)
 
 
 if "VARIANT_TAG" not in work.columns:
@@ -405,6 +409,10 @@ if "VARIANT_TAG" not in work.columns:
 
 # Kullanıcı arayüzü
 st.header("📋 Varyant Özeti — erişkin eşikleri ile")
+st.caption(
+    "Son halini Streamlit arayüzünde anlık görebilmek için `streamlit run app.py` komutunu çalıştırabilirsiniz. "
+    "Bu bölüm, yüklediğiniz verilere göre her yeniden çalıştırmada güncellenir."
+)
 
 # Sadece anlamlı etiketleri (harfler) göster
 order = ["Hb S-β-thal", "HbS", "HbC", "HbD", "HbE", "HbA2↑", "HbF↑", "Normal"]

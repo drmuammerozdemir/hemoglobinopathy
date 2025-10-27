@@ -434,23 +434,7 @@ PARAMS = {
     "HbF (%)":       ("Hb F (%)",    "0–2"),
     "F/":            ("Hb F (%)",    "0–2"),
 }
-st.subheader("♀/♂ Mean ± SD (seçilen varyant)")
-rows = []
-for tetkik_key, (disp, ref) in PARAMS.items():
-    subp = base_v[base_v["TETKIK_ISMI"] == tetkik_key].copy()
-    if subp.empty: continue
-    subp = add_numeric_copy(subp)
-    fem  = _mean_sd(subp.loc[subp["CINSIYET"].astype(str).str.lower().str.startswith(("k","f")), "__VAL_NUM__"])
-    male = _mean_sd(subp.loc[subp["CINSIYET"].astype(str).str.lower().str.startswith(("e","m")), "__VAL_NUM__"])
-    rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
-table_fm = pd.DataFrame(rows)
-if table_fm.empty and variant_choice != "(Tümü)":
-    st.info("Bu varyant için parametrik veri bulunamadı.")
-else:
-    st.dataframe(table_fm, use_container_width=True)
-    st.download_button("⬇️ Tablo #1 (CSV)",
-                       data=table_fm.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="varyant_ozet_female_male.csv", mime="text/csv")
+
 
 # Birleşik tablo (opsiyonel)
 if variant_choice != "(Tümü)":

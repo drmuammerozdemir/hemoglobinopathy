@@ -128,7 +128,6 @@ def _resolve_patient_sex(series: pd.Series) -> str:
 def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
     tmp = frame[["TCKIMLIK_NO", "CINSIYET"]].copy()
     tmp["__SEX_CANON__"] = tmp["CINSIYET"].map(normalize_sex_label)
-    tmp["__SEX_CANON__"] = tmp["__SEX_CANON__"].astype(object)
 
     row_counts = (
         tmp["__SEX_CANON__"].fillna("Bilinmiyor").value_counts(dropna=False)

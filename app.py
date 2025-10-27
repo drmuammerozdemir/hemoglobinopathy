@@ -746,11 +746,6 @@ for test_name in selected_tests:
     if sub.empty:
         continue
 
-for test_name in selected_tests:
-    sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
-    if sub.empty:
-        continue
-
     # --- KATEGORİK TESTLER (Kan Grubu, Anormal Hb) ---
     if test_name in {"Kan Grubu/", "Anormal Hb/"}:
         st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi).")

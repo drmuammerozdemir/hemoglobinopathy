@@ -488,13 +488,16 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     else:
         normalized = raw_text.map(norm_anormal_hb_text)
 
-    # 1) Ham yazımların sayımı
+    # 1) Ham yazımların sayımı  (sürüm-dostu)
     sub_text = raw_text[raw_text.str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]
     if sub_text.empty:
-        st.info("Harf içeren veri bulunamadı."); 
+        st.info("Harf içeren veri bulunamadı.")
     else:
-        value_counts = (sub_text.value_counts(dropna=False)
-                        .reset_index().rename(columns={"index":"Benzersiz Değer", 0:"Frekans"}))
+        value_counts = (
+            sub_text.value_counts(dropna=False)
+            .rename_axis("Benzersiz Değer")
+            .reset_index(name="Frekans")
+        )
         st.markdown("**Ham Yazımlar**")
         st.dataframe(value_counts, use_container_width=True)
         st.download_button(
@@ -504,11 +507,18 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
             mime="text/csv"
         )
 
-    # 2) Normalize edilmiş kategorilerin sayımı
-    norm_counts = (normalized.value_counts(dropna=False)
-                   .reset_index().rename(columns={"index":"Kategori (normalize)", 0:"N"}))
+    # 2) Normalize edilmiş kategorilerin sayımı  (sürüm-dostu)
+    norm_counts = (
+        normalized.value_counts(dropna=False)
+        .rename_axis("Kategori (normalize)")
+        .reset_index(name="N")
+    )
     if not norm_counts.empty:
-        norm_counts["%"] = (norm_counts["N"]/norm_counts["N"].sum()*100).round(2)
+        totalN = int(norm_counts["N"].sum())
+        norm_counts["%"] = (norm_counts["N"] / totalN * 100).round(2)
+    else:
+        norm_counts["%"] = []
+
     st.markdown("**Normalize Edilmiş Kategoriler**")
     st.dataframe(norm_counts, use_container_width=True)
     st.download_button(

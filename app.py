@@ -186,9 +186,10 @@ def downcast_df(df: pd.DataFrame) -> pd.DataFrame:
         df["TEST_DEGERI"] = coerce_numeric(df["TEST_DEGERI"])
         df["TEST_DEGERI"] = pd.to_numeric(df["TEST_DEGERI"], errors="coerce", downcast="float")
     # Kategorik alanlar
-    for col in ["TETKIK_ISMI", "CINSIYET", "SOURCE_FILE"]:
+    for col in ["TETKIK_ISMI", "SOURCE_FILE"]:
         if col in df.columns:
             df[col] = df[col].astype("category")
+    # CINSIYET -> object kalsın
     return df
 
 def descr_stats_fast(x: pd.Series) -> dict:

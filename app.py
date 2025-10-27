@@ -770,100 +770,41 @@ for test_name in selected_tests:
         continue
 
     # --- KATEGORİK TESTLER (Kan Grubu, Anormal Hb) ---
-    if test_name in {"Kan Grubu/", "Anormal Hb/"}:
-        st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi).")
+# === BENZERSİZ METİN DEĞERLERİ ve FREKANSLARI ===
+st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")
 
-        import re
-        def normalize_blood_group(x):
-            if not isinstance(x, str): return None
-            s = x.upper().replace("İ","I").strip()
-            abo = None
-            if re.search(r"\bAB\b", s): abo = "AB"
-            elif re.search(r"\bA\b", s): abo = "A"
-            elif re.search(r"\bB\b", s): abo = "B"
-            elif re.search(r"\b0\b|\bO\b", s): abo = "O"
-            rh = "Rh(+)" if re.search(r"(\+|POS|POZ|RH\+)", s) else ("Rh(-)" if re.search(r"(\-|NEG)", s) else "")
-            return (abo + (" " + rh if rh else "")).strip() if abo else s
-
-        def normalize_anormal_hb_text(x):
-            if not isinstance(x, str): return None
-            s = x.upper().replace("İ","I").strip()
-            if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
-            if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
-            if re.search(r"\bHBC\b", s): return "HbC"
-            if re.search(r"\bHBD\b", s): return "HbD"
-            if re.search(r"\bHBE\b", s): return "HbE"
-            if re.search(r"\bA2\b|HBA2", s): return "HbA2↑"
-            if re.search(r"\bF\b|HBF", s): return "HbF↑"
-            if re.search(r"\bNORMAL\b|NEG", s): return "Normal"
-            return None
-
-        if test_name == "Kan Grubu/":
-            cat_series = sub["TEST_DEGERI"].map(normalize_blood_group)
-        else:
-            cat_series = sub["TEST_DEGERI"].map(normalize_anormal_hb_text)
-
-        sub_cat = sub.assign(__CAT__=cat_series)
-
-        # TCKIMLIK_NO'yu güvenle string göster
-        if "TCKIMLIK_NO" in sub_cat.columns:
-            sub_cat["TCKIMLIK_NO"] = sub_cat["TCKIMLIK_NO"].apply(
-                lambda v: "" if pd.isna(v) else str(v).rstrip(".0")
-            )
-
-        # Sadece kategorisi belirli olanları olgu listesine al
-        sub_cat_nonnull = sub_cat[sub_cat["__CAT__"].notna()].copy()
-
-        # ---- Frekans tablosu ----
-        freq_all = (sub_cat["__CAT__"].value_counts(dropna=False)
-                    .rename_axis("Kategori").to_frame("N").reset_index())
-        total = int(freq_all["N"].sum()) if not freq_all.empty else 0
-        if total > 0:
-            freq_all["%"] = (freq_all["N"]/total*100).round(2)
-
-        freq_by_sex = (sub_cat.pivot_table(index="__CAT__", columns="CINSIYET",
-                                           values="PROTOKOL_NO", aggfunc="count", fill_value=0)
-                       .astype(int).reset_index().rename(columns={"__CAT__":"Kategori"}))
-
-        from scipy.stats import chi2_contingency
-        chi2_msg = "Ki-kare uygulanamadı."
-        try:
-            cont = freq_by_sex.drop(columns=["Kategori"]).values
-            if cont.sum() > 0 and cont.shape[1] > 1:
-                chi2, p, dof, _ = chi2_contingency(cont)
-                chi2_msg = f"Chi-square: χ²={chi2:.2f}, df={dof}, p={p:.4g}"
-        except Exception as e:
-            chi2_msg = f"Hata: {e}"
-
-        tabs = st.tabs(["Frekans", "Cinsiyet Dağılımı", "İstatistik", "Olgu Listesi"])
-        with tabs[0]:
-            st.dataframe(freq_all, use_container_width=True)
-        with tabs[1]:
-            st.dataframe(freq_by_sex, use_container_width=True)
-        with tabs[2]:
-            st.info(chi2_msg)
-        with tabs[3]:
-            keep = ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE"]
-            keep = [c for c in keep if c in sub_cat_nonnull.columns]
-            case_tbl = sub_cat_nonnull[keep + ["TEST_DEGERI","__CAT__"]].rename(columns={"__CAT__":"Kategori"})
-            st.dataframe(case_tbl, use_container_width=True)
-            st.download_button(
-                "⬇️ Olgu listesi (CSV)",
-                data=case_tbl.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"{test_name}_olgu_listesi.csv", mime="text/csv"
-            )
-
-        results_rows.append({
-            "TETKIK_ISMI": test_name,
-            "N": int(freq_all["N"].sum()),
-            "Mean": None, "Median": None, "Std": None,
-            "Min": None, "Q1": None, "Q3": None, "Max": None,
-            "Normalite": "—", "Test": chi2_msg
-        })
-
-        # ÖZEL KOL TAMAMLANDI → genel kola geçme
+for test_name in ["Kan Grubu/", "Anormal Hb/"]:
+    sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
+    if sub.empty:
+        st.warning(f"{test_name} verisi bulunamadı.")
         continue
-    # --- KATEGORİK TESTLER BLOĞU (BİTİR)
+
+    st.subheader(f"🔍 {test_name}")
+
+    # Sadece metin içeren değerleri filtrele
+    sub_text = sub[sub["TEST_DEGERI"].astype(str).str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]
+
+    if sub_text.empty:
+        st.info("Harf içeren veri bulunamadı.")
+        continue
+
+    # Benzersiz değerleri say
+    value_counts = (sub_text["TEST_DEGERI"]
+                    .astype(str)
+                    .str.strip()
+                    .value_counts(dropna=False)
+                    .reset_index()
+                    .rename(columns={"index": "Benzersiz Değer", "TEST_DEGERI": "Frekans"}))
+
+    st.dataframe(value_counts, use_container_width=True)
+
+    st.download_button(
+        f"⬇️ {test_name.strip('/')}_benzersiz_degerler.csv",
+        data=value_counts.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"{test_name.strip('/')}_benzersiz_degerler.csv",
+        mime="text/csv"
+    )
+
 
 
     # sayısal kopya hazırla

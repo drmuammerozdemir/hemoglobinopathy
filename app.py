@@ -746,6 +746,11 @@ for test_name in selected_tests:
     if sub.empty:
         continue
 
+for test_name in selected_tests:
+    sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
+    if sub.empty:
+        continue
+
     # --- KATEGORİK TESTLER (Kan Grubu, Anormal Hb) ---
     if test_name in {"Kan Grubu/", "Anormal Hb/"}:
         st.info("Bu tetkik kategorik olarak değerlendirildi (frekans analizi).")
@@ -773,7 +778,7 @@ for test_name in selected_tests:
             if re.search(r"\bA2\b|HBA2", s): return "HbA2↑"
             if re.search(r"\bF\b|HBF", s): return "HbF↑"
             if re.search(r"\bNORMAL\b|NEG", s): return "Normal"
-            return s or None
+            return None
 
         if test_name == "Kan Grubu/":
             cat_series = sub["TEST_DEGERI"].map(normalize_blood_group)
@@ -781,6 +786,15 @@ for test_name in selected_tests:
             cat_series = sub["TEST_DEGERI"].map(normalize_anormal_hb_text)
 
         sub_cat = sub.assign(__CAT__=cat_series)
+
+        # TCKIMLIK_NO'yu güvenle string göster
+        if "TCKIMLIK_NO" in sub_cat.columns:
+            sub_cat["TCKIMLIK_NO"] = sub_cat["TCKIMLIK_NO"].apply(
+                lambda v: "" if pd.isna(v) else str(v).rstrip(".0")
+            )
+
+        # Sadece kategorisi belirli olanları olgu listesine al
+        sub_cat_nonnull = sub_cat[sub_cat["__CAT__"].notna()].copy()
 
         # ---- Frekans tablosu ----
         freq_all = (sub_cat["__CAT__"].value_counts(dropna=False)
@@ -812,12 +826,14 @@ for test_name in selected_tests:
             st.info(chi2_msg)
         with tabs[3]:
             keep = ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE"]
-            keep = [c for c in keep if c in sub_cat.columns]
-            case_tbl = sub_cat[keep + ["TEST_DEGERI","__CAT__"]].rename(columns={"__CAT__":"Kategori"})
+            keep = [c for c in keep if c in sub_cat_nonnull.columns]
+            case_tbl = sub_cat_nonnull[keep + ["TEST_DEGERI","__CAT__"]].rename(columns={"__CAT__":"Kategori"})
             st.dataframe(case_tbl, use_container_width=True)
-            st.download_button("⬇️ Olgu listesi (CSV)",
+            st.download_button(
+                "⬇️ Olgu listesi (CSV)",
                 data=case_tbl.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"{test_name}_olgu_listesi.csv", mime="text/csv")
+                file_name=f"{test_name}_olgu_listesi.csv", mime="text/csv"
+            )
 
         results_rows.append({
             "TETKIK_ISMI": test_name,
@@ -826,6 +842,10 @@ for test_name in selected_tests:
             "Min": None, "Q1": None, "Q3": None, "Max": None,
             "Normalite": "—", "Test": chi2_msg
         })
+
+        # ÖZEL KOL TAMAMLANDI → genel kola geçme
+        continue
+    # --- KATEGORİK TESTLER BLOĞU (BİTİR)
 
 
     # sayısal kopya hazırla

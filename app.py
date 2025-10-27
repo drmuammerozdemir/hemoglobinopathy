@@ -298,7 +298,7 @@ else:
 left, right = st.columns([3, 2])
 with left:
     unique_tests = sorted([str(x) for x in df["TETKIK_ISMI"].dropna().unique()])
-    default_pick = unique_tests[:5] if len(unique_tests) > 5 else unique_tests[:1]
+    default_pick = unique_tests
     selected_tests = st.multiselect("Analiz edilecek tetkikler", options=unique_tests, default=default_pick)
 with right:
     sexes = [str(x) for x in df["CINSIYET"].dropna().unique()]

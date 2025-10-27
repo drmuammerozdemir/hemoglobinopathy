@@ -72,6 +72,9 @@ VARIANT_NUMERIC_TESTS = {
 }
 DISPLAY_LIMIT = 200  # Büyük veri için önizleme limiti
 
+MALE_TOKENS = {"e", "erkek", "m", "male", "bay"}
+FEMALE_TOKENS = {"k", "kadın", "kadin", "f", "female", "bayan"}
+
 # Polars mevcut mu?
 try:
     import polars as pl
@@ -94,9 +97,87 @@ def add_numeric_copy(frame, src_col="TEST_DEGERI", out_col="__VAL_NUM__"):
         )
         frame[out_col] = pd.to_numeric(tmp, errors="coerce")
     return frame
-    
+
 def check_columns(df: pd.DataFrame):
     return [c for c in REQ_COLS if c not in df.columns]
+
+
+def normalize_sex_label(value):
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    low = trimmed.lower()
+    if low in MALE_TOKENS:
+        return "Erkek"
+    if low in FEMALE_TOKENS:
+        return "Kadın"
+    return trimmed
+
+
+def _resolve_patient_sex(series: pd.Series) -> str:
+    values = [v for v in pd.unique(series.dropna()) if isinstance(v, str) and v]
+    if not values:
+        return "Bilinmiyor"
+    if len(values) == 1:
+        return values[0]
+    return "Çakışma"
+
+
+def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
+    tmp = frame[["TCKIMLIK_NO", "CINSIYET"]].copy()
+    tmp["__SEX_CANON__"] = tmp["CINSIYET"].map(normalize_sex_label)
+
+    row_counts = (
+        tmp["__SEX_CANON__"].fillna("Bilinmiyor").value_counts(dropna=False)
+        .rename_axis("CINSIYET")
+        .to_frame("Satır Sayısı")
+    )
+
+    with_id = tmp[tmp["TCKIMLIK_NO"].notna()].copy()
+    if not with_id.empty:
+        patient_gender = (
+            with_id.groupby("TCKIMLIK_NO")["__SEX_CANON__"]
+            .apply(_resolve_patient_sex)
+            .reset_index(name="__SEX_RESOLVED__")
+        )
+        patient_counts = (
+            patient_gender["__SEX_RESOLVED__"].value_counts(dropna=False)
+            .rename_axis("CINSIYET")
+            .to_frame("Hasta (Benzersiz)")
+        )
+    else:
+        patient_counts = pd.DataFrame(columns=["Hasta (Benzersiz)"])
+
+    summary = row_counts.join(patient_counts, how="outer").fillna(0)
+    summary["Satır Sayısı"] = summary["Satır Sayısı"].astype(int)
+    summary["Hasta (Benzersiz)"] = summary["Hasta (Benzersiz)"].astype(int)
+
+    total_rows = summary["Satır Sayısı"].sum()
+    total_patients = summary["Hasta (Benzersiz)"].sum()
+
+    if total_rows:
+        summary["% Satır"] = (summary["Satır Sayısı"] / total_rows * 100).round(2)
+    else:
+        summary["% Satır"] = np.nan
+
+    if total_patients:
+        summary["% Hasta"] = (
+            summary["Hasta (Benzersiz)"] / total_patients * 100
+        ).round(2)
+    else:
+        summary["% Hasta"] = np.nan
+
+    summary = summary.reset_index()
+    summary = summary[[
+        "CINSIYET",
+        "Hasta (Benzersiz)",
+        "% Hasta",
+        "Satır Sayısı",
+        "% Satır",
+    ]]
+    return summary.sort_values("Hasta (Benzersiz)", ascending=False).reset_index(drop=True)
 
 def downcast_df(df: pd.DataFrame) -> pd.DataFrame:
     # PROTOKOL_NO, TCKIMLIK_NO sayıya dönmesin (ID olabilir), diğer uygun alanları küçült
@@ -637,24 +718,12 @@ st.header("⚙️ Hızlı Özet ve Kırılımlar")
 colA, colB = st.columns(2)
 with colA:
     st.write("**Cinsiyete Göre Tanımlayıcılar (Seçimdeki veri)**")
-    if use_polars and pl_df is not None:
-        pl_sub = pl.from_pandas(work[["CINSIYET", "TEST_DEGERI"]].copy())
-        grp = (pl_sub
-               .groupby("CINSIYET")
-               .agg([pl.len().alias("count"),
-                     pl.col("TEST_DEGERI").mean().alias("mean"),
-                     pl.col("TEST_DEGERI").std().alias("std"),
-                     pl.col("TEST_DEGERI").min().alias("min"),
-                     pl.col("TEST_DEGERI").median().alias("median"),
-                     pl.col("TEST_DEGERI").quantile(0.25, "nearest").alias("q1"),
-                     pl.col("TEST_DEGERI").quantile(0.75, "nearest").alias("q3"),
-                     pl.col("TEST_DEGERI").max().alias("max")])
-               .to_pandas())
-        st.dataframe(grp, use_container_width=True)
-    else:
-        grp = (work.groupby("CINSIYET", dropna=False)["TEST_DEGERI"]
-               .agg(["count", "mean", "std", "min", "median", "max"]).reset_index())
-        st.dataframe(grp, use_container_width=True)
+    sex_summary = summarize_sex_counts(work)
+    st.dataframe(sex_summary, use_container_width=True)
+    st.caption(
+        "Hasta sayıları benzersiz TCKIMLIK_NO üzerinden hesaplanır. "
+        "Aynı kimlik için çelişen cinsiyet kayıtları 'Çakışma' olarak işaretlenir."
+    )
 
 with colB:
     st.write("**Dosyaya Göre Satır & Hasta & Tetkik Sayısı**")

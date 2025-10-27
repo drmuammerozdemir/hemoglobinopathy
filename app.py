@@ -492,8 +492,7 @@ if "VARIANT_TAG" not in work.columns:
 # Kullanıcı arayüzü
 st.header("📋 Varyant Özeti — erişkin eşikleri ile")
 st.caption(
-    "Son halini Streamlit arayüzünde anlık görebilmek için `streamlit run app.py` komutunu çalıştırabilirsiniz. "
-    "Bu bölüm, yüklediğiniz verilere göre her yeniden çalıştırmada güncellenir."
+    "LETS GO!"
 )
 
 # Sadece anlamlı etiketleri (harfler) göster
@@ -560,16 +559,40 @@ else:
                        data=table_fm.to_csv(index=False).encode("utf-8-sig"),
                        file_name="varyant_ozet_female_male.csv", mime="text/csv")
 
-# Olgu listesi: seçili varyantta kimler var?
-if variant_choice != "(Tümü)":
-    cols_keep = ["PROTOKOL_NO", "TCKIMLIK_NO", "CINSIYET", "SOURCE_FILE"]
-    cols_keep = [c for c in cols_keep if c in base_v.columns]
-    case_tbl = base_v.drop_duplicates(subset=["PROTOKOL_NO"])[cols_keep + ["VARIANT_TAG"]]
-    st.subheader("Olgu listesi (seçilen varyant)")
-    st.dataframe(case_tbl, use_container_width=True)
-    st.download_button("⬇️ Olgu listesi (CSV)",
-                       data=case_tbl.to_csv(index=False).encode("utf-8-sig"),
-                       file_name=f"olgu_listesi_{variant_choice}.csv", mime="text/csv")
+# === VARYANT FREKANSI + MEAN±SD BİRLEŞİK TABLO (BAŞLA)
+if variant_choice == "(Tümü)":
+    # frekans ve mean±sd aynı anda anlamlı değil; yalnızca birleşik tabloyu 'Tümü' için üretmeyelim
+    pass
+else:
+    # Birleştirilmiş görünüm: iki tabloyu tek tabloda alt alta
+    freq_part = freq.copy() if 'freq' in locals() else pd.DataFrame(columns=["Varyant","N","%"])
+    if not freq_part.empty:
+        freq_part = freq_part.rename(columns={"Varyant":"Başlık"})
+        freq_part.insert(0, "Bölüm", "Varyant Frekansları")
+    msd_part = table_fm.copy() if 'table_fm' in locals() else pd.DataFrame(columns=["Parameter","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"])
+    if not msd_part.empty:
+        msd_part = msd_part.rename(columns={"Parameter":"Başlık"})
+        msd_part.insert(0, "Bölüm", "♀/♂ Mean ± SD")
+
+    # Aynı kolon setine getir
+    cols = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
+    for dfc in (freq_part, msd_part):
+        for c in cols:
+            if c not in dfc.columns:
+                dfc[c] = None
+        dfc = dfc[cols]
+    combined_df = pd.concat([freq_part[cols], msd_part[cols]], ignore_index=True)
+
+    st.subheader("🧩 Birleşik Tablo")
+    st.dataframe(combined_df, use_container_width=True)
+    st.download_button(
+        "⬇️ Birleşik tablo (CSV)",
+        data=combined_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"birlesik_{variant_choice}.csv",
+        mime="text/csv"
+    )
+# === VARYANT FREKANSI + MEAN±SD BİRLEŞİK TABLO (BİTİR)
+
 
 
 # ================= Ön-izleme & Müdahale: Metinden Sayıya ================= #

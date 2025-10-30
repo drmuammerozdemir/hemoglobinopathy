@@ -688,9 +688,9 @@ with colB:
 st.header("📊 Tetkik Bazlı Analiz (Seçim)")
 results_rows = []
 for test_name in selected_tests:
-# === BEGIN PATCH: overall pool for global stats ===
-overall_pool = []
-# === END PATCH ===
+    # === BEGIN PATCH: overall pool for global stats ===
+    overall_pool = []
+    # === END PATCH ===
     if test_name in CATEGORICAL_TESTS:
         # Kan Grubu/ ve Anormal Hb/ yukarıda özel blokta analiz edildi
         continue

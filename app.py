@@ -1,4 +1,4 @@
-# app_optimized.py
+# app.py
 # -*- coding: utf-8 -*-
 """
 🧪 Tetkik Analiz Arayüzü — Çoklu Dosya (Optimize, Revize)

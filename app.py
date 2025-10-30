@@ -774,6 +774,27 @@ for test_name in selected_tests:
 if results_rows:
     st.header("🧾 Toplu Özet Tablosu (Seçili Tetkikler)")
     res_df = pd.DataFrame(results_rows)
+    # === BEGIN PATCH: append global total row ===
+    if len(overall_pool) > 0:
+        overall_stats = descr_stats_fast(pd.Series(overall_pool))
+        # N'yi tek tek testlerden de toplayabiliriz ama havuz zaten filtre-sonrası gerçek toplamı temsil ediyor
+        overall_row = {
+            "TETKIK_ISMI": "GENEL TOPLAM",
+            "N": overall_stats["count"],
+            "Mean": overall_stats["mean"],
+            "Median": overall_stats["median"],
+            "Std": overall_stats["std"],
+            "Min": overall_stats["min"],
+            "Q1": overall_stats["q1"],
+            "Q3": overall_stats["q3"],
+            "Max": overall_stats["max"],
+            "Normalite": "—",
+            "Test": "—",
+        }
+        res_df = pd.concat([res_df, pd.DataFrame([overall_row])], ignore_index=True)
+    # === END PATCH ===
+
+    
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 

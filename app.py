@@ -64,87 +64,7 @@ try:
     HAS_POLARS = True
 except Exception:
     HAS_POLARS = False
-# --- Ham Yazımdan olgu & tüm tetkikler tarayıcı (Anormal Hb/) ---
-st.markdown("### 🧑‍⚕️ Olgu seç ve tüm tetkikleri göster")
-
-# 1) Ham yazım seçtir (listemizi biraz önce oluşturduğumuz value_counts'tan alıyoruz)
-ham_yazim_ops = value_counts["Benzersiz Değer"].astype(str).tolist()
-secili_yazim = st.selectbox("Ham yazım seçin", options=ham_yazim_ops, key=f"hamyazim_{test_name}")
-
-if secili_yazim:
-    # 2) Bu yazıma sahip satırlar (yalnızca Anormal Hb/ altındaki satırlar)
-    yazim_mask = sub["TEST_DEGERI"].astype(str).str.strip() == str(secili_yazim).strip()
-    yazim_satirlari = sub.loc[yazim_mask].copy()
-
-    st.markdown("**Bu yazımı taşıyan olgular**")
-    olgu_kolon = ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"]
-    olgu_tablo = yazim_satirlari[olgu_kolon]
-    st.dataframe(olgu_tablo, use_container_width=True)
-    st.download_button(
-        "⬇️ Olgu listesi (CSV)",
-        data=olgu_tablo.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"AnormalHb_ham_{secili_yazim}_olgular.csv",
-        mime="text/csv"
-    )
-
-    # 3) Hasta seçtir (TCKIMLIK_NO varsa)
-    hastalar = yazim_satirlari["TCKIMLIK_NO"].dropna().astype(str).unique().tolist()
-    protokoller = yazim_satirlari["PROTOKOL_NO"].astype(str).unique().tolist()
-
-    if hastalar:
-        secili_tc = st.selectbox("Hasta (TCKIMLIK_NO) seçin", options=hastalar, key=f"tc_{test_name}")
-        yalnizca_ayni_protokol = st.checkbox(
-            "Sadece bu yazımın görüldüğü protokolleri filtrele",
-            value=True, key=f"protofiltre_{test_name}"
-        )
-
-        if yalnizca_ayni_protokol:
-            ilgili_protokoller = yazim_satirlari.loc[
-                yazim_satirlari["TCKIMLIK_NO"].astype(str) == secili_tc, "PROTOKOL_NO"
-            ].astype(str).unique().tolist()
-            hasta_tum = work[
-                (work["TCKIMLIK_NO"].astype(str) == secili_tc) &
-                (work["PROTOKOL_NO"].astype(str).isin(ilgili_protokoller))
-            ].copy()
-        else:
-            hasta_tum = work[work["TCKIMLIK_NO"].astype(str) == secili_tc].copy()
-
-        st.markdown("**Seçilen hastanın tüm tetkikleri**")
-        goster = ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE"]
-        if not hasta_tum.empty:
-            st.dataframe(hasta_tum[goster].sort_values(["PROTOKOL_NO","TETKIK_ISMI"]),
-                         use_container_width=True)
-            st.download_button(
-                "⬇️ Hastanın tüm tetkikleri (CSV)",
-                data=hasta_tum[goster].sort_values(["PROTOKOL_NO","TETKIK_ISMI"])
-                    .to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"tum_tetkikler_{secili_tc}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("Bu hasta için gösterilecek tetkik bulunamadı.")
-
-    else:
-        # TCKIMLIK_NO yoksa protokol üzerinden gezdir
-        st.info("TCKIMLIK_NO bulunamadı; protokol ile gezdiriyorum.")
-        secili_proto = st.selectbox("Protokol seçin", options=protokoller, key=f"proto_{test_name}")
-        proto_tum = work[work["PROTOKOL_NO"].astype(str) == str(secili_proto)].copy()
-
-        st.markdown("**Seçilen protokole ait tüm tetkikler**")
-        goster = ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE","TCKIMLIK_NO"]
-        if not proto_tum.empty:
-            st.dataframe(proto_tum[goster].sort_values(["TETKIK_ISMI"]), use_container_width=True)
-            st.download_button(
-                "⬇️ Protokol tetkikleri (CSV)",
-                data=proto_tum[goster].sort_values(["TETKIK_ISMI"])
-                    .to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"tum_tetkikler_protokol_{secili_proto}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("Bu protokol için gösterilecek tetkik bulunamadı.")
-
-
+    
 # ============== Yardımcılar ============== #
 def coerce_numeric(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.replace(",", ".", regex=False).str.replace(" ", "", regex=False)
@@ -558,6 +478,47 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     else:
         value_counts = (
             sub_text.value_counts(dropna=False)
+                # ✅ Ham yazımdan olgu seçme ve tüm tetkikleri gösterme
+    st.markdown("### 🧑‍⚕️ Olgu seç ve tüm tetkikleri göster (Anormal Hb)")
+
+    ham_yazim_ops = value_counts["Benzersiz Değer"].astype(str).tolist()
+    secili_yazim = st.selectbox("Ham yazım seçin", options=ham_yazim_ops, key=f"hamyazim_{test_name}")
+
+    if secili_yazim:
+        yazim_mask = sub["TEST_DEGERI"].astype(str).str.strip() == str(secili_yazim).strip()
+        yazim_satirlari = sub.loc[yazim_mask].copy()
+
+        st.markdown("**Bu yazımı taşıyan olgular**")
+        olgu_kolon = ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"]
+        olgu_tablo = yazim_satirlari[olgu_kolon]
+        st.dataframe(olgu_tablo, use_container_width=True)
+
+        hastalar = yazim_satirlari["TCKIMLIK_NO"].dropna().astype(str).unique().tolist()
+        protokoller = yazim_satirlari["PROTOKOL_NO"].astype(str).unique().tolist()
+
+        if hastalar:
+            secili_tc = st.selectbox("Hasta seçin (TCKIMLIK_NO)", options=hastalar, key=f"tc_{test_name}")
+            ilgili_protokoller = yazim_satirlari.loc[
+                yazim_satirlari["TCKIMLIK_NO"].astype(str) == secili_tc, "PROTOKOL_NO"
+            ].astype(str).unique().tolist()
+
+            hasta_tum = work[
+                (work["TCKIMLIK_NO"].astype(str) == secili_tc) &
+                (work["PROTOKOL_NO"].astype(str).isin(ilgili_protokoller))
+            ].copy()
+
+            st.markdown("**Seçilen hastanın tüm tetkikleri**")
+            goster = ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE"]
+            st.dataframe(hasta_tum[goster].sort_values(["PROTOKOL_NO","TETKIK_ISMI"]), use_container_width=True)
+
+        else:
+            secili_proto = st.selectbox("Protokol seçin", options=protokoller, key=f"proto_{test_name}")
+            proto_tum = work[work["PROTOKOL_NO"].astype(str) == str(secili_proto)].copy()
+
+            st.markdown("**Seçilen protokole ait tüm tetkikler**")
+            goster = ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE","TCKIMLIK_NO"]
+            st.dataframe(proto_tum[goster].sort_values(["TETKIK_ISMI"]), use_container_width=True)
+
             .rename_axis("Benzersiz Değer")
             .reset_index(name="Frekans")
         )

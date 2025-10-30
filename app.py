@@ -688,6 +688,9 @@ with colB:
 st.header("📊 Tetkik Bazlı Analiz (Seçim)")
 results_rows = []
 for test_name in selected_tests:
+# === BEGIN PATCH: overall pool for global stats ===
+overall_pool = []
+# === END PATCH ===
     if test_name in CATEGORICAL_TESTS:
         # Kan Grubu/ ve Anormal Hb/ yukarıda özel blokta analiz edildi
         continue
@@ -725,6 +728,10 @@ for test_name in selected_tests:
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
     _msg_df = sub_work.rename(columns={"__VAL_NUM__": "VAL"})
     msg, _ = nonparametric_test_by_group(_msg_df, "VAL", "CINSIYET")
+    # === BEGIN PATCH: collect values for global stats ===
+    overall_pool.extend(pd.to_numeric(_msg_df["VAL"], errors="coerce").dropna().tolist())
+    # === END PATCH ===
+
 
     results_rows.append({
         "TETKIK_ISMI": test_name,

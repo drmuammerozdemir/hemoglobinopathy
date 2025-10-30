@@ -11,9 +11,10 @@
     • Kan Grubu: A/B/AB/O/0 + Rh(+/-/poz/neg/rh+/rh-) → tek tipe
     • Anormal Hb: HbS/HbC/HbD/HbE/HbA2↑/HbF↑/Normal
 - Hem ham yazımlar hem normalize edilmiş kategoriler ayrı tablolar/CSV
+- Ham yazımdan hasta/protokol seçerek hastanın/protokolün tüm tetkiklerini göster
 
 Çalıştırma:
-    streamlit run app_optimized.py
+    streamlit run app.py
 """
 
 import io
@@ -64,11 +65,13 @@ try:
     HAS_POLARS = True
 except Exception:
     HAS_POLARS = False
-    
+
+
 # ============== Yardımcılar ============== #
 def coerce_numeric(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.replace(",", ".", regex=False).str.replace(" ", "", regex=False)
     return pd.to_numeric(s, errors="coerce")
+
 
 def add_numeric_copy(frame, src_col="TEST_DEGERI", out_col="__VAL_NUM__"):
     if out_col not in frame.columns:
@@ -78,8 +81,10 @@ def add_numeric_copy(frame, src_col="TEST_DEGERI", out_col="__VAL_NUM__"):
         frame[out_col] = pd.to_numeric(tmp, errors="coerce")
     return frame
 
+
 def check_columns(df: pd.DataFrame):
     return [c for c in REQ_COLS if c not in df.columns]
+
 
 def normalize_sex_label(value):
     if not isinstance(value, str): return None
@@ -90,11 +95,13 @@ def normalize_sex_label(value):
     if low in FEMALE_TOKENS: return "Kadın"
     return trimmed
 
+
 def _resolve_patient_sex(series: pd.Series) -> str:
     values = [v for v in pd.unique(series.dropna()) if isinstance(v, str) and v]
     if not values: return "Bilinmiyor"
     if len(values) == 1: return values[0]
     return "Çakışma"
+
 
 def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
     tmp = frame[["TCKIMLIK_NO", "CINSIYET"]].copy()
@@ -135,6 +142,7 @@ def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
     summary = summary[["CINSIYET","Hasta (Benzersiz)","% Hasta","Satır Sayısı","% Satır"]]
     return summary.sort_values("Hasta (Benzersiz)", ascending=False).reset_index(drop=True)
 
+
 def downcast_df(df: pd.DataFrame) -> pd.DataFrame:
     if "TEST_DEGERI" in df.columns:
         df["TEST_DEGERI"] = df["TEST_DEGERI"].astype(str)
@@ -142,6 +150,7 @@ def downcast_df(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].astype("category")
     return df
+
 
 def descr_stats_fast(x: pd.Series) -> dict:
     x = pd.to_numeric(x, errors="coerce")
@@ -153,6 +162,7 @@ def descr_stats_fast(x: pd.Series) -> dict:
     std = float(x.std(ddof=1)) if len(x) > 1 else 0.0
     cv  = (std/mean)*100 if mean!=0 else np.nan
     return {"count":int(x.size),"mean":mean,"std":std,"min":float(x.min()),"q1":float(q[0]),"median":float(q[1]),"q3":float(q[2]),"max":float(x.max()),"cv%":float(cv),"iqr":float(q[2]-q[0])}
+
 
 def normality_flag(x: pd.Series, alpha=0.05) -> str:
     x = pd.to_numeric(x, errors="coerce").dropna()
@@ -168,6 +178,7 @@ def normality_flag(x: pd.Series, alpha=0.05) -> str:
     except Exception:
         return "bilinmiyor"
 
+
 def apply_threshold(series, rule):
     op, cut = rule
     if op == ">=": return series >= cut
@@ -175,6 +186,7 @@ def apply_threshold(series, rule):
     if op == "<=": return series <= cut
     if op == "<":  return series <  cut
     return series.notna()
+
 
 def nonparametric_test_by_group(df, val_col, grp_col):
     groups = [g.dropna() for _, g in df.groupby(grp_col)[val_col]]
@@ -197,6 +209,7 @@ def nonparametric_test_by_group(df, val_col, grp_col):
         stat, p = stats.kruskal(*groups)
         return f"Kruskal–Wallis: H={stat:.2f}, p={p:.4g} (grup sayısı: {len(unique_groups)})", ("KW", stat, p, unique_groups)
 
+
 def make_boxplot(df, x_col, y_col, title="Kutu Grafiği"):
     valid = df[[x_col, y_col]].copy()
     valid[y_col] = pd.to_numeric(valid[y_col], errors="coerce")
@@ -210,6 +223,7 @@ def make_boxplot(df, x_col, y_col, title="Kutu Grafiği"):
     ax.set_title(title); ax.set_xlabel(x_col); ax.set_ylabel(y_col)
     st.pyplot(fig)
 
+
 def make_hist(df, col, bins=30, title="Histogram"):
     x = pd.to_numeric(df[col], errors="coerce").dropna()
     if x.empty:
@@ -218,6 +232,7 @@ def make_hist(df, col, bins=30, title="Histogram"):
     ax.hist(x, bins=bins)
     ax.set_title(title); ax.set_xlabel(col); ax.set_ylabel("Frekans")
     st.pyplot(fig)
+
 
 def export_df(df, name="export.csv"):
     csv = df.to_csv(index=False).encode("utf-8-sig")
@@ -256,6 +271,7 @@ def normalize_blood_group(x: str | None):
         return None
     return f"{abo or ''} {rh or ''}".strip()
 
+
 def norm_anormal_hb_text(x: str | None):
     if not isinstance(x, str): return None
     s = x.upper().replace("İ","I").strip()
@@ -275,6 +291,7 @@ def norm_anormal_hb_text(x: str | None):
 def read_one_excel_cached(file_bytes: bytes, engine_hint: str = "openpyxl") -> pd.DataFrame:
     bio = io.BytesIO(file_bytes)
     return pd.read_excel(bio, engine=engine_hint)
+
 
 def read_many_excels(files):
     def _read(upl):
@@ -297,7 +314,7 @@ st.caption("Büyük veri ve çoklu dosya için hızlandırılmış sürüm (kan 
 
 uploads = st.file_uploader("Excel dosyaları (.xlsx, .xls) — Çoklu seçim", type=["xlsx", "xls"], accept_multiple_files=True)
 
-use_polars = st.checkbox("Polars hızlandırmayı dene (kuruluysa)", value=('polars' in globals() and HAS_POLARS),
+use_polars = st.checkbox("Polars hızlandırmayı dene (kuruluysa)", value=('pl' in globals() and HAS_POLARS),
                          help="Polars kurulu değilse otomatik devre dışı kalır.")
 
 if not uploads:
@@ -329,9 +346,11 @@ df = downcast_df(df)
 
 if use_polars and HAS_POLARS:
     try: pl_df = pl.from_pandas(df)
-    except Exception: use_polars, pl_df = False, None
+    except Exception: 
+        use_polars, pl_df = False, None
 else:
     pl_df = None
+
 
 # ================= Filtreler ================= #
 left, right = st.columns([3, 2])
@@ -354,6 +373,7 @@ if selected_tests:
 
 # Güvence: numeric kopya olsun
 work = add_numeric_copy(work)
+
 
 # ================= VARYANT ÖZETİ (etiketleme) ================= #
 A2_KEYS = {"A2/","HbA2","HbA2 (%)","Hb A2","Hb A2 (%)"}
@@ -403,6 +423,7 @@ base_v = work.copy()
 if variant_choice != "(Tümü)":
     base_v = base_v[base_v["VARIANT_TAG"] == variant_choice]
 
+# 1) Tümü için frekans
 if variant_choice == "(Tümü)":
     freq = (work["VARIANT_TAG"].value_counts(dropna=True)
             .rename_axis("Varyant").to_frame("N").reset_index())
@@ -414,7 +435,7 @@ if variant_choice == "(Tümü)":
                        data=freq.to_csv(index=False).encode("utf-8-sig"),
                        file_name="varyant_frekans.csv", mime="text/csv")
 
-# ========== Seçilen varyant için Female/Male Mean±SD ==========
+# 2) Seçilen varyant için ♀/♂ Mean ± SD tablosu
 def _mean_sd(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce").dropna()
     return "—" if s.empty else f"{s.mean():.2f} ± {s.std(ddof=1):.2f}"
@@ -434,15 +455,37 @@ PARAMS = {
     "F/":            ("Hb F (%)",    "0–2"),
 }
 
+table_fm = pd.DataFrame()
+if variant_choice != "(Tümü)":
+    rows = []
+    for tetkik_key, (disp, ref) in PARAMS.items():
+        subp = base_v[base_v["TETKIK_ISMI"] == tetkik_key].copy()
+        if subp.empty: 
+            continue
+        subp = add_numeric_copy(subp)  # __VAL_NUM__ güvence
+        fem = _mean_sd(subp.loc[subp["CINSIYET"].astype(str).str.lower().str.startswith(("k","f")), "__VAL_NUM__"])
+        male= _mean_sd(subp.loc[subp["CINSIYET"].astype(str).str.lower().str.startswith(("e","m")), "__VAL_NUM__"])
+        rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
+    table_fm = pd.DataFrame(rows)
+    st.subheader("♀/♂ Mean ± SD (seçilen varyant)")
+    if table_fm.empty:
+        st.info("Bu varyant için parametrik veri bulunamadı.")
+    else:
+        st.dataframe(table_fm, use_container_width=True)
+        st.download_button("⬇️ Tablo #1 (CSV)",
+                           data=table_fm.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="varyant_ozet_female_male.csv", mime="text/csv")
 
-# Birleşik tablo (opsiyonel)
+# 3) Birleşik tablo (Varyant Frekansları + Mean±SD)
 if variant_choice != "(Tümü)":
     freq_part = locals().get("freq", pd.DataFrame(columns=["Varyant","N","%"])).copy()
     if not freq_part.empty:
-        freq_part = freq_part.rename(columns={"Varyant":"Başlık"}); freq_part.insert(0,"Bölüm","Varyant Frekansları")
+        freq_part = freq_part.rename(columns={"Varyant":"Başlık"})
+        freq_part.insert(0,"Bölüm","Varyant Frekansları")
     msd_part = table_fm.copy()
     if not msd_part.empty:
-        msd_part = msd_part.rename(columns={"Parameter":"Başlık"}); msd_part.insert(0,"Bölüm","♀/♂ Mean ± SD")
+        msd_part = msd_part.rename(columns={"Parameter":"Başlık"})
+        msd_part.insert(0,"Bölüm","♀/♂ Mean ± SD")
     cols = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
     for dfc in (freq_part, msd_part):
         for c in cols:
@@ -461,7 +504,8 @@ st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")
 for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
     if sub.empty:
-        st.warning(f"{test_name} verisi bulunamadı."); continue
+        st.warning(f"{test_name} verisi bulunamadı."); 
+        continue
 
     st.subheader(f"🔍 {test_name}")
 
@@ -471,14 +515,29 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     else:
         normalized = raw_text.map(norm_anormal_hb_text)
 
-    # 1) Ham yazımların sayımı  (sürüm-dostu)
+    # 1) Ham yazımların sayımı
     sub_text = raw_text[raw_text.str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]
     if sub_text.empty:
         st.info("Harf içeren veri bulunamadı.")
+        value_counts = pd.DataFrame(columns=["Benzersiz Değer","Frekans"])
     else:
         value_counts = (
+            sub_text.value_counts(dropna=False)
+            .rename_axis("Benzersiz Değer")
+            .reset_index(name="Frekans")
+        )
+
+    st.markdown("**Ham Yazımlar**")
+    st.dataframe(value_counts, use_container_width=True)
+    st.download_button(
+        f"⬇️ {test_name.strip('/')}_benzersiz_degerler.csv",
+        data=value_counts.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"{test_name.strip('/')}_benzersiz_degerler.csv",
+        mime="text/csv"
+    )
+
     # ✅ Ham yazımdan hasta/protokol seçimi ve tüm tetkiklerinin görüntülenmesi
-    if not sub_text.empty:
+    if not value_counts.empty:
         ham_yazim_ops = value_counts["Benzersiz Değer"].astype(str).tolist()
         secili_yazim = st.selectbox(
             "Ham yazım seçin", 
@@ -491,11 +550,11 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
             yazim_satirlari = sub.loc[yazim_mask].copy()
 
             st.markdown("**Bu yazımı taşıyan olgular**")
-            olgu_kolon = ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"]
+            olgu_kolon = [c for c in ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"] if c in yazim_satirlari.columns]
             st.dataframe(yazim_satirlari[olgu_kolon], use_container_width=True)
 
-            hastalar = yazim_satirlari["TCKIMLIK_NO"].dropna().astype(str).unique().tolist()
-            protokoller = yazim_satirlari["PROTOKOL_NO"].astype(str).unique().tolist()
+            hastalar = yazim_satirlari["TCKIMLIK_NO"].dropna().astype(str).unique().tolist() if "TCKIMLIK_NO" in yazim_satirlari.columns else []
+            protokoller = yazim_satirlari["PROTOKOL_NO"].astype(str).unique().tolist() if "PROTOKOL_NO" in yazim_satirlari.columns else []
 
             if hastalar:
                 secili_tc = st.selectbox(
@@ -503,54 +562,43 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
                     options=hastalar,
                     key=f"tc_{test_name}"
                 )
-
                 ilgili_protokoller = yazim_satirlari.loc[
                     yazim_satirlari["TCKIMLIK_NO"].astype(str) == secili_tc,
                     "PROTOKOL_NO"
                 ].astype(str).unique().tolist()
-
                 hasta_tum = work[
                     (work["TCKIMLIK_NO"].astype(str) == secili_tc) &
                     (work["PROTOKOL_NO"].astype(str).isin(ilgili_protokoller))
                 ].copy()
 
                 st.markdown("**Seçilen hastanın tüm tetkikleri**")
-                kolonlar = ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE"]
-                st.dataframe(
-                    hasta_tum[kolonlar].sort_values(["PROTOKOL_NO","TETKIK_ISMI"]),
-                    use_container_width=True
-                )
-
+                kolonlar = [c for c in ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE"] if c in hasta_tum.columns]
+                if not hasta_tum.empty:
+                    st.dataframe(
+                        hasta_tum[kolonlar].sort_values(["PROTOKOL_NO","TETKIK_ISMI"]),
+                        use_container_width=True
+                    )
+                else:
+                    st.info("Bu hastanın ilgili protokollerinde başka tetkik bulunamadı.")
             else:
-                secili_proto = st.selectbox(
-                    "Protokol seçin",
-                    options=protokoller,
-                    key=f"proto_{test_name}"
-                )
-                proto_tum = work[work["PROTOKOL_NO"].astype(str) == str(secili_proto)].copy()
+                if protokoller:
+                    secili_proto = st.selectbox(
+                        "Protokol seçin",
+                        options=protokoller,
+                        key=f"proto_{test_name}"
+                    )
+                    proto_tum = work[work["PROTOKOL_NO"].astype(str) == str(secili_proto)].copy()
+                    st.markdown("**Seçilen protokole ait tüm tetkikler**")
+                    kolonlar = [c for c in ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE","TCKIMLIK_NO"] if c in proto_tum.columns]
+                    if not proto_tum.empty:
+                        st.dataframe(
+                            proto_tum[kolonlar].sort_values(["TETKIK_ISMI"]),
+                            use_container_width=True
+                        )
+                    else:
+                        st.info("Bu protokolde başka tetkik bulunamadı.")
 
-                st.markdown("**Seçilen protokole ait tüm tetkikler**")
-                kolonlar = ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE","TCKIMLIK_NO"]
-                st.dataframe(
-                    proto_tum[kolonlar].sort_values(["TETKIK_ISMI"]),
-                    use_container_width=True
-                )
-
-            
-            sub_text.value_counts(dropna=False)
-            .rename_axis("Benzersiz Değer")
-            .reset_index(name="Frekans")
-        )
-        st.markdown("**Ham Yazımlar**")
-        st.dataframe(value_counts, use_container_width=True)
-        st.download_button(
-            f"⬇️ {test_name.strip('/')}_benzersiz_degerler.csv",
-            data=value_counts.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"{test_name.strip('/')}_benzersiz_degerler.csv",
-            mime="text/csv"
-        )
-
-    # 2) Normalize edilmiş kategorilerin sayımı  (sürüm-dostu)
+    # 2) Normalize edilmiş kategorilerin sayımı
     norm_counts = (
         normalized.value_counts(dropna=False)
         .rename_axis("Kategori (normalize)")
@@ -560,7 +608,8 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         totalN = int(norm_counts["N"].sum())
         norm_counts["%"] = (norm_counts["N"] / totalN * 100).round(2)
     else:
-        norm_counts["%"] = []
+        # Boşsa tutarlı kolon yapısı bırak
+        norm_counts = pd.DataFrame(columns=["Kategori (normalize)", "N", "%"])
 
     st.markdown("**Normalize Edilmiş Kategoriler**")
     st.dataframe(norm_counts, use_container_width=True)
@@ -571,14 +620,17 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         mime="text/csv"
     )
 
-    # Kategorik genel frekans/ki-kare tabloları normalize etiketle
+    # Kategorik genel frekans/ki-kare tabloları (normalize etiketle)
     cat_name = "__CAT__"
     sub = sub.assign(**{cat_name: normalized})
 
     freq_all = (sub[cat_name].value_counts(dropna=False)
                 .rename_axis("Kategori").to_frame("N").reset_index())
     totalN = int(freq_all["N"].sum()) if not freq_all.empty else 0
-    if totalN: freq_all["%"] = (freq_all["N"]/totalN*100).round(2)
+    if totalN: 
+        freq_all["%"] = (freq_all["N"]/totalN*100).round(2)
+    else:
+        freq_all["%"] = []
 
     freq_by_sex = (sub.pivot_table(index=cat_name, columns="CINSIYET",
                                    values="PROTOKOL_NO", aggfunc="count", fill_value=0)
@@ -613,6 +665,7 @@ with st.expander("Ham Veri Ön İzleme (limitli)"):
     st.dataframe(work.head(DISPLAY_LIMIT), use_container_width=True)
     st.caption(f"Yalnızca ilk {DISPLAY_LIMIT} satır görüntülenir.")
 
+
 # ================= Hızlı Özetler ================= #
 st.header("⚙️ Hızlı Özet ve Kırılımlar")
 colA, colB = st.columns(2)
@@ -630,15 +683,19 @@ with colB:
     st.dataframe(per_file, use_container_width=True)
     export_df(per_file, "dosya_bazinda_ozet_filtreli.csv")
 
+
 # ================= Tetkik Bazlı Analiz (Seçim) ================= #
 st.header("📊 Tetkik Bazlı Analiz (Seçim)")
 results_rows = []
 for test_name in selected_tests:
-    sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
-    if sub.empty: continue
+    if test_name in CATEGORICAL_TESTS:
+        # Kan Grubu/ ve Anormal Hb/ yukarıda özel blokta analiz edildi
+        continue
 
-    # KATEGORİK TESTLER burada ayrıca ele alınmıyor; yukarıdaki özel blokta zaten verildi.
-    # Numerik analizler:
+    sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
+    if sub.empty: 
+        continue
+
     use_threshold = st.checkbox(
         f"‘{test_name}’ için erişkin eşiğini uygula",
         value=(test_name in THRESHOLDS),
@@ -657,7 +714,8 @@ for test_name in selected_tests:
         sub_work = sub_work[sub_work["__VAL_NUM__"] > 0]
         st.caption("Filtre: > 0")
     if sub_work.empty:
-        st.warning("Filtre sonrası satır bulunamadı."); continue
+        st.warning("Filtre sonrası satır bulunamadı."); 
+        continue
 
     stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
     normal_flag   = normality_flag(sub_work["__VAL_NUM__"])

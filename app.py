@@ -816,10 +816,10 @@ for test_name in selected_tests:
     stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
     normal_flag   = normality_flag(sub_work["__VAL_NUM__"])
     # Normalite testi (etiket + p)
-    norm_label, norm_p_disp = normality_test_with_p(sub_work["__VAL_NUM__"])
+        norm_label, norm_p_disp = normality_test_with_p(sub_work["__VAL_NUM__"])
 
     # Genel toplama havuzuna ekle
-    overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
+        overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
 
     # ----- P değeri yazım kuralı (Türkçe ondalık) -----
 def _fmt_p(p: float) -> str:

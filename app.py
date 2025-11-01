@@ -364,18 +364,26 @@ with right:
     chosen_files = st.multiselect("Dosya filtresi", options=files, default=files)
 
 # --- 99 ile başlayan TCKN filtreleme kontrolü ---
-st.markdown("### 🧾 Veri Filtre Ayarları")
+st.markdown("### 🧾 TCKN Filtre Seçimi")
 
-include_99 = st.checkbox(
-    "99 ile başlayan TCKN'leri dahil et",
-    value=False,
-    help="Genelde geçici/dummy kayıtlar için kullanılır. Varsayılan: hariç."
+tckn_filter = st.selectbox(
+    "TCKN filtrele:",
+    ["Hepsi", "Sadece gerçek TCKN", "Sadece 99'lu TCKN"],
+    index=1,  # Varsayılan: Sadece gerçek TCKN
+    help="99 ile başlayanlar genelde geçici kayıtlardır."
 )
 
 work = df.copy()
-# 99 ile başlayan TCKN'leri filtrele (kullanıcı istemezse)
-if not include_99 and "TCKIMLIK_NO" in work.columns:
-    work = work[~work["TCKIMLIK_NO"].astype(str).str.startswith("99")]
+# --- TCKN filtreleme ---
+if "TCKIMLIK_NO" in work.columns:
+    tckn_str = work["TCKIMLIK_NO"].astype(str)
+
+    if tckn_filter == "Sadece gerçek TCKN":
+        work = work[~tckn_str.str.startswith("99", na=False)]
+
+    elif tckn_filter == "Sadece 99'lu TCKN":
+        work = work[tckn_str.str.startswith("99", na=False)]
+
 if chosen_sex:
     work = work[work["CINSIYET"].astype(str).isin(chosen_sex)]
 if chosen_files:

@@ -165,37 +165,37 @@ def descr_stats_fast(x: pd.Series) -> dict:
 
 
 def normality_flag(x: pd.Series, alpha=0.05) -> str:
-    # ----- P değeri yazım kuralı (Türkçe ondalık) -----
-def _fmt_p(p: float) -> str:
-    if p is None or np.isnan(p):
-        return "—"
-    if p < 0.001:
-        return "<0,001"
-    if p < 0.05:
-        return "<0,05"
-    return f"{p:.3f}".replace(".", ",")
+# ----- P değeri yazım kuralı (Türkçe ondalık) -----
+    def _fmt_p(p: float) -> str:
+        if p is None or np.isnan(p):
+            return "—"
+        if p < 0.001:
+            return "<0,001"
+        if p < 0.05:
+            return "<0,05"
+        return f"{p:.3f}".replace(".", ",")
 
 # ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
-def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
-    x = pd.to_numeric(series, errors="coerce").dropna()
-    n = len(x)
-    if n < 3:
-        return "yetersiz", "—"
+    def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
+        x = pd.to_numeric(series, errors="coerce").dropna()
+        n = len(x)
+        if n < 3:
+            return "yetersiz", "—"
 
-    try:
-        if n <= 5000:
-            stat, p = stats.shapiro(x)
-        else:
-            mu = float(np.mean(x))
-            sd = float(np.std(x, ddof=1))
-            if sd == 0:
-                return "yetersiz", "—"
-            stat, p = stats.kstest(x, 'norm', args=(mu, sd))
+        try:
+            if n <= 5000:
+                stat, p = stats.shapiro(x)
+            else:
+                mu = float(np.mean(x))
+                sd = float(np.std(x, ddof=1))
+                if sd == 0:
+                    return "yetersiz", "—"
+                stat, p = stats.kstest(x, 'norm', args=(mu, sd))
 
-        label = "normal" if p >= alpha else "non-normal"
-        return label, _fmt_p(p)
-    except Exception:
-        return "bilinmiyor", "—"
+            label = "normal" if p >= alpha else "non-normal"
+            return label, _fmt_p(p)
+        except Exception:
+            return "bilinmiyor", "—"
 
     x = pd.to_numeric(x, errors="coerce").dropna()
     if len(x) < 3: return "yetersiz"

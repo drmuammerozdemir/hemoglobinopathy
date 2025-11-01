@@ -1,3 +1,4 @@
+# ==== FILE START ====
 # app.py
 # -*- coding: utf-8 -*-
 """
@@ -164,48 +165,49 @@ def descr_stats_fast(x: pd.Series) -> dict:
     return {"count":int(x.size),"mean":mean,"std":std,"min":float(x.min()),"q1":float(q[0]),"median":float(q[1]),"q3":float(q[2]),"max":float(x.max()),"cv%":float(cv),"iqr":float(q[2]-q[0])}
 
 
-def normality_flag(x: pd.Series, alpha=0.05) -> str:
 # ----- P değeri yazım kuralı (Türkçe ondalık) -----
-    def _fmt_p(p: float) -> str:
-        if p is None or np.isnan(p):
-            return "—"
-        if p < 0.001:
-            return "<0,001"
-        if p < 0.05:
-            return "<0,05"
-        return f"{p:.3f}".replace(".", ",")
+def _fmt_p(p: float) -> str:
+    if p is None or np.isnan(p):
+        return "—"
+    if p < 0.001:
+        return "<0,001"
+    if p < 0.05:
+        return "<0,05"
+    return f"{p:.3f}".replace(".", ",")
+
 
 # ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
-    def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
-        x = pd.to_numeric(series, errors="coerce").dropna()
-        n = len(x)
-        if n < 3:
-            return "yetersiz", "—"
+def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
+    x = pd.to_numeric(series, errors="coerce").dropna()
+    n = len(x)
+    if n < 3:
+        return "yetersiz", "—"
+    try:
+        if n <= 5000:
+            stat, p = stats.shapiro(x)
+        else:
+            mu = float(np.mean(x))
+            sd = float(np.std(x, ddof=1))
+            if sd == 0:
+                return "yetersiz", "—"
+            stat, p = stats.kstest(x, 'norm', args=(mu, sd))  # H0: N(mu, sd)
+        label = "normal" if p >= alpha else "non-normal"
+        return label, _fmt_p(p)
+    except Exception:
+        return "bilinmiyor", "—"
 
-        try:
-            if n <= 5000:
-                stat, p = stats.shapiro(x)
-            else:
-                mu = float(np.mean(x))
-                sd = float(np.std(x, ddof=1))
-                if sd == 0:
-                    return "yetersiz", "—"
-                stat, p = stats.kstest(x, 'norm', args=(mu, sd))
 
-            label = "normal" if p >= alpha else "non-normal"
-            return label, _fmt_p(p)
-        except Exception:
-            return "bilinmiyor", "—"
-
+def normality_flag(x: pd.Series, alpha=0.05) -> str:
     x = pd.to_numeric(x, errors="coerce").dropna()
-    if len(x) < 3: return "yetersiz"
+    if len(x) < 3:
+        return "yetersiz"
     try:
         if len(x) <= 5000:
-            stat, p = stats.shapiro(x)
+            _, p = stats.shapiro(x)
             return "normal" if p >= alpha else "non-normal"
         else:
             res = stats.anderson(x, dist="norm")
-            crit = res.critical_values[2]
+            crit = res.critical_values[2]  # ~%5
             return "normal" if res.statistic < crit else "non-normal"
     except Exception:
         return "bilinmiyor"
@@ -274,8 +276,8 @@ def export_df(df, name="export.csv"):
 # ======== ÖZEL: Kategorik normalizasyon fonksiyonları ======== #
 def normalize_blood_group(x: str | None):
     """
-    'A Rh (+) Pozitif' -> 'A Rh(+)', 'O Rh -' -> 'O Rh(-)', '0 +' -> 'O Rh(+)'
-    metin anlaşılmazsa None döner.
+    'A Rh (+) Pozitif' -> 'A Rh(+)', 'O Rh -' -> 'O Rh(-)', '0 +' -> 'O Rh(+)'.
+    Anlaşılmazsa None döner.
     """
     if not isinstance(x, str): return None
     u = x.strip().upper().replace("İ", "I")
@@ -675,7 +677,7 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         # Bu özel akışta frekans/ki-kare göstermiyoruz.
         continue  # >>> döngünün geri kalanını Kan Grubu/ için çalıştır
 
-    # ============ STANDART AKIŞ: KAN GRUBU/ (mevcut mantığınız) ============
+    # ============ STANDART AKIŞ: KAN GRUBU/ ============
     # 1) Ham yazımların sayımı
     sub_text = raw_text[raw_text.str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]
     if sub_text.empty:
@@ -780,10 +782,9 @@ with colB:
 # ================= Tetkik Bazlı Analiz (Seçim) ================= #
 st.header("📊 Tetkik Bazlı Analiz (Seçim)")
 results_rows = []
+overall_pool = []  # <<< GENEL HAVUZ: döngü dışı
+
 for test_name in selected_tests:
-    # === BEGIN PATCH: overall pool for global stats ===
-    overall_pool = []
-    # === END PATCH ===
     if test_name in CATEGORICAL_TESTS:
         # Kan Grubu/ ve Anormal Hb/ yukarıda özel blokta analiz edildi
         continue
@@ -813,57 +814,27 @@ for test_name in selected_tests:
         st.warning("Filtre sonrası satır bulunamadı."); 
         continue
 
+    # Tanımlayıcılar ve normalite
     stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
-    normal_flag   = normality_flag(sub_work["__VAL_NUM__"])
-    # Normalite testi (etiket + p)
-        norm_label, norm_p_disp = normality_test_with_p(sub_work["__VAL_NUM__"])
+    normal_flag_label   = normality_flag(sub_work["__VAL_NUM__"])
+    norm_label, norm_p_disp = normality_test_with_p(sub_work["__VAL_NUM__"])
 
-    # Genel toplama havuzuna ekle
-        overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
+    # GENEL havuza değer ekle
+    overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
 
-    # ----- P değeri yazım kuralı (Türkçe ondalık) -----
-def _fmt_p(p: float) -> str:
-    if p is None or np.isnan(p):
-        return "—"
-    if p < 0.001:
-        return "<0,001"
-    if p < 0.05:
-        return "<0,05"
-    return f"{p:.3f}".replace(".", ",")
-
-# ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
-def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
-    x = pd.to_numeric(series, errors="coerce").dropna()
-    n = len(x)
-    if n < 3:
-        return "yetersiz", "—"
-
-    try:
-        if n <= 5000:
-            stat, p = stats.shapiro(x)
-        else:
-            mu = float(np.mean(x))
-            sd = float(np.std(x, ddof=1))
-            if sd == 0:
-                return "yetersiz", "—"
-            # H0: veri ~ N(mu, sd)
-            stat, p = stats.kstest(x, 'norm', args=(mu, sd))
-
-        label = "normal" if p >= alpha else "non-normal"
-        return label, _fmt_p(p)
-    except Exception:
-        return "bilinmiyor", "—"
-
+    # Kırılımlar
     by_sex  = (sub_work.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
     by_file = (sub_work.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
     _msg_df = sub_work.rename(columns={"__VAL_NUM__": "VAL"})
     msg, _ = nonparametric_test_by_group(_msg_df, "VAL", "CINSIYET")
-    # === BEGIN PATCH: collect values for global stats ===
-    overall_pool.extend(pd.to_numeric(_msg_df["VAL"], errors="coerce").dropna().tolist())
-    # === END PATCH ===
 
+    # Sonuç satırı (Mean ± SD dahil)
+    mean_pm_sd = (
+        "—" if np.isnan(stats_overall["mean"]) or np.isnan(stats_overall["std"])
+        else f"{stats_overall['mean']:.2f} ± {stats_overall['std']:.2f}"
+    )
 
     results_rows.append({
         "TETKIK_ISMI": test_name,
@@ -871,11 +842,13 @@ def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
         "Mean": stats_overall["mean"],
         "Median": stats_overall["median"],
         "Std": stats_overall["std"],
+        "Mean ± SD": mean_pm_sd,
         "Min": stats_overall["min"],
         "Q1": stats_overall["q1"],
         "Q3": stats_overall["q3"],
         "Max": stats_overall["max"],
-        "Normalite": normal_flag,
+        "Normalite": normal_flag_label,
+        "p (normalite)": norm_p_disp,
         "Test": msg
     })
 
@@ -906,29 +879,37 @@ def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
 if results_rows:
     st.header("🧾 Toplu Özet Tablosu (Seçili Tetkikler)")
     res_df = pd.DataFrame(results_rows)
-    # === BEGIN PATCH: append global total row ===
+
+    # === GENEL TOPLAM: bağımsız normalite ve p ===
     if len(overall_pool) > 0:
-        overall_stats = descr_stats_fast(pd.Series(overall_pool))
-        # N'yi tek tek testlerden de toplayabiliriz ama havuz zaten filtre-sonrası gerçek toplamı temsil ediyor
+        overall_series = pd.Series(overall_pool)
+        overall_stats = descr_stats_fast(overall_series)
+        overall_norm_label, overall_norm_p = normality_test_with_p(overall_series)
+
+        mean_pm_sd_overall = (
+            "—" if np.isnan(overall_stats["mean"]) or np.isnan(overall_stats["std"])
+            else f"{overall_stats['mean']:.2f} ± {overall_stats['std']:.2f}"
+        )
+
         overall_row = {
             "TETKIK_ISMI": "GENEL TOPLAM",
             "N": overall_stats["count"],
             "Mean": overall_stats["mean"],
             "Median": overall_stats["median"],
             "Std": overall_stats["std"],
+            "Mean ± SD": mean_pm_sd_overall,
             "Min": overall_stats["min"],
             "Q1": overall_stats["q1"],
             "Q3": overall_stats["q3"],
             "Max": overall_stats["max"],
-            "Normalite": norm_label,         
-            "p (normalite)": norm_p_disp,     
+            "Normalite": overall_norm_label,
+            "p (normalite)": overall_norm_p,
             "Test": "—",
         }
         res_df = pd.concat([res_df, pd.DataFrame([overall_row])], ignore_index=True)
-    # === END PATCH ===
 
-    
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
+# ==== FILE END ====

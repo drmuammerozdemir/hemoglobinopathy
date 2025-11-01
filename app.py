@@ -504,7 +504,7 @@ st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")
 for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
     if sub.empty:
-        st.warning(f"{test_name} verisi bulunamadı."); 
+        st.warning(f"{test_name} verisi bulunamadı.")
         continue
 
     st.subheader(f"🔍 {test_name}")
@@ -515,6 +515,115 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     else:
         normalized = raw_text.map(norm_anormal_hb_text)
 
+    # ============ ÖZEL AKIŞ: ANORMAL Hb/ ============
+    if test_name == "Anormal Hb/":
+        # 1) Ham yazım → TC listesi (Frekans yerine)
+        sub_nonempty = sub[raw_text.ne("") & sub["TEST_DEGERI"].notna()].copy()
+        if sub_nonempty.empty:
+            st.info("Anormal Hb/ için dolu metin bulunamadı.")
+        else:
+            # Her ham değer için benzersiz TCKIMLIK_NO listesini çıkar
+            map_tc = (
+                sub_nonempty
+                .assign(_val=raw_text.loc[sub_nonempty.index])
+                .groupby("_val", dropna=False)["TCKIMLIK_NO"]
+                .apply(lambda s: ", ".join(sorted({str(x) for x in s.dropna().astype(str)})) or "—")
+                .reset_index()
+                .rename(columns={"_val": "Ham Değer", "TCKIMLIK_NO": "TCKIMLIK_NO (liste)"})
+            )
+            st.markdown("**Ham yazımlar (TC listeli)**")
+            st.dataframe(map_tc, use_container_width=True)
+            st.download_button(
+                "⬇️ AnormalHb_ham_yazim_TC_listesi.csv",
+                data=map_tc.to_csv(index=False).encode("utf-8-sig"),
+                file_name="AnormalHb_ham_yazim_TC_listesi.csv",
+                mime="text/csv",
+            )
+
+        # 2) Düzenlenebilir tablo (CLEAN kolonu)
+        edit_cols = [c for c in ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"] if c in sub_nonempty.columns]
+        edit_df = sub_nonempty[edit_cols].copy()
+        clean_col = "ANORMAL_HB_CLEAN"
+        # Daha önce varsa koru; yoksa normalize öneriyi doldur
+        if clean_col in sub_nonempty.columns:
+            edit_df[clean_col] = sub_nonempty[clean_col].astype(str)
+        else:
+            edit_df[clean_col] = normalized.loc[sub_nonempty.index].fillna("").astype(str)
+
+        st.markdown("**Düzenlenebilir tablo (CLEAN değerini yazın)**")
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            key="anormalhb_editor",
+            column_config={
+                "TEST_DEGERI": st.column_config.TextColumn(label="ORIGINAL", help="Ham değer", disabled=True),
+                clean_col: st.column_config.TextColumn(label="CLEAN (düzenlenebilir)"),
+            },
+        )
+        col_apply, col_over = st.columns([1,1])
+        with col_apply:
+            apply_now = st.button("✅ Uygula ve kaydet (oturum içi)", key="apply_anormalhb")
+        with col_over:
+            overwrite_main = st.checkbox("ORIGINAL sütununu da CLEAN ile değiştir", value=False, key="over_anormalhb")
+
+        if apply_now and not edited.empty:
+            # PROTOKOL_NO + ORIGINAL eşleşmesine göre geri yaz
+            upd = edited[[c for c in ["PROTOKOL_NO","TEST_DEGERI",clean_col] if c in edited.columns]].copy()
+            upd.rename(columns={clean_col: "__CLEAN_TMP__"}, inplace=True)
+
+            key_proto = work["PROTOKOL_NO"].astype(str) if "PROTOKOL_NO" in work.columns else pd.Series("", index=work.index)
+            key_test  = work["TEST_DEGERI"].astype(str).str.strip()
+
+            for _, r in upd.iterrows():
+                proto = str(r.get("PROTOKOL_NO",""))
+                orig  = str(r.get("TEST_DEGERI","")).strip()
+                mask = (key_proto == proto) & (key_test == orig)
+                work.loc[mask, clean_col] = r["__CLEAN_TMP__"]
+                if overwrite_main:
+                    work.loc[mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
+
+            st.success("Anormal Hb/ CLEAN değerleri uygulandı.")
+            st.download_button(
+                "⬇️ Güncellenmiş veri (CSV)",
+                data=work.to_csv(index=False).encode("utf-8-sig"),
+                file_name="guncellenmis_veri.csv",
+                mime="text/csv",
+            )
+
+        # 3) Seçince hastanın/protokolün tüm tetkikleri
+        st.markdown("**Hızlı inceleme: bir hasta veya protokol seçin**")
+        tcs  = sorted({str(x) for x in sub_nonempty.get("TCKIMLIK_NO", pd.Series(dtype=object)).dropna().astype(str)})
+        prot = sorted({str(x) for x in sub_nonempty.get("PROTOKOL_NO", pd.Series(dtype=object)).dropna().astype(str)})
+
+        tabs_sel = st.tabs(["Hasta ile seç", "Protokol ile seç"])
+        with tabs_sel[0]:
+            if tcs:
+                sel_tc = st.selectbox("TCKIMLIK_NO", options=tcs, key="sel_tc_anormalhb")
+                proto_for_tc = (
+                    sub_nonempty.loc[sub_nonempty["TCKIMLIK_NO"].astype(str) == sel_tc, "PROTOKOL_NO"]
+                    .astype(str).unique().tolist()
+                ) if "PROTOKOL_NO" in sub_nonempty.columns else []
+                all_tests = work[
+                    (work["TCKIMLIK_NO"].astype(str) == sel_tc) &
+                    (work["PROTOKOL_NO"].astype(str).isin(proto_for_tc))
+                ].copy()
+                show_cols = [c for c in ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE"] if c in all_tests.columns]
+                st.dataframe(all_tests[show_cols].sort_values(show_cols[:2]) if not all_tests.empty else all_tests, use_container_width=True)
+            else:
+                st.info("Seçilebilir hasta yok.")
+        with tabs_sel[1]:
+            if prot:
+                sel_p = st.selectbox("PROTOKOL_NO", options=prot, key="sel_proto_anormalhb")
+                all_tests = work[work["PROTOKOL_NO"].astype(str) == sel_p].copy()
+                show_cols = [c for c in ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE","TCKIMLIK_NO"] if c in all_tests.columns]
+                st.dataframe(all_tests[show_cols].sort_values("TETKIK_ISMI") if not all_tests.empty else all_tests, use_container_width=True)
+            else:
+                st.info("Seçilebilir protokol yok.")
+
+        # Bu özel akışta frekans/ki-kare göstermiyoruz.
+        continue  # >>> döngünün geri kalanını Kan Grubu/ için çalıştır
+
+    # ============ STANDART AKIŞ: KAN GRUBU/ (mevcut mantığınız) ============
     # 1) Ham yazımların sayımı
     sub_text = raw_text[raw_text.str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]
     if sub_text.empty:
@@ -526,7 +635,6 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
             .rename_axis("Benzersiz Değer")
             .reset_index(name="Frekans")
         )
-
     st.markdown("**Ham Yazımlar**")
     st.dataframe(value_counts, use_container_width=True)
     st.download_button(
@@ -535,68 +643,6 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         file_name=f"{test_name.strip('/')}_benzersiz_degerler.csv",
         mime="text/csv"
     )
-
-    # ✅ Ham yazımdan hasta/protokol seçimi ve tüm tetkiklerinin görüntülenmesi
-    if not value_counts.empty:
-        ham_yazim_ops = value_counts["Benzersiz Değer"].astype(str).tolist()
-        secili_yazim = st.selectbox(
-            "Ham yazım seçin", 
-            options=ham_yazim_ops, 
-            key=f"hamyazim_{test_name}"
-        )
-
-        if secili_yazim:
-            yazim_mask = sub["TEST_DEGERI"].astype(str).str.strip() == str(secili_yazim).strip()
-            yazim_satirlari = sub.loc[yazim_mask].copy()
-
-            st.markdown("**Bu yazımı taşıyan olgular**")
-            olgu_kolon = [c for c in ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"] if c in yazim_satirlari.columns]
-            st.dataframe(yazim_satirlari[olgu_kolon], use_container_width=True)
-
-            hastalar = yazim_satirlari["TCKIMLIK_NO"].dropna().astype(str).unique().tolist() if "TCKIMLIK_NO" in yazim_satirlari.columns else []
-            protokoller = yazim_satirlari["PROTOKOL_NO"].astype(str).unique().tolist() if "PROTOKOL_NO" in yazim_satirlari.columns else []
-
-            if hastalar:
-                secili_tc = st.selectbox(
-                    "Hasta seçin (TCKIMLIK_NO)",
-                    options=hastalar,
-                    key=f"tc_{test_name}"
-                )
-                ilgili_protokoller = yazim_satirlari.loc[
-                    yazim_satirlari["TCKIMLIK_NO"].astype(str) == secili_tc,
-                    "PROTOKOL_NO"
-                ].astype(str).unique().tolist()
-                hasta_tum = work[
-                    (work["TCKIMLIK_NO"].astype(str) == secili_tc) &
-                    (work["PROTOKOL_NO"].astype(str).isin(ilgili_protokoller))
-                ].copy()
-
-                st.markdown("**Seçilen hastanın tüm tetkikleri**")
-                kolonlar = [c for c in ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE"] if c in hasta_tum.columns]
-                if not hasta_tum.empty:
-                    st.dataframe(
-                        hasta_tum[kolonlar].sort_values(["PROTOKOL_NO","TETKIK_ISMI"]),
-                        use_container_width=True
-                    )
-                else:
-                    st.info("Bu hastanın ilgili protokollerinde başka tetkik bulunamadı.")
-            else:
-                if protokoller:
-                    secili_proto = st.selectbox(
-                        "Protokol seçin",
-                        options=protokoller,
-                        key=f"proto_{test_name}"
-                    )
-                    proto_tum = work[work["PROTOKOL_NO"].astype(str) == str(secili_proto)].copy()
-                    st.markdown("**Seçilen protokole ait tüm tetkikler**")
-                    kolonlar = [c for c in ["PROTOKOL_NO","TETKIK_ISMI","TEST_DEGERI","CINSIYET","SOURCE_FILE","TCKIMLIK_NO"] if c in proto_tum.columns]
-                    if not proto_tum.empty:
-                        st.dataframe(
-                            proto_tum[kolonlar].sort_values(["TETKIK_ISMI"]),
-                            use_container_width=True
-                        )
-                    else:
-                        st.info("Bu protokolde başka tetkik bulunamadı.")
 
     # 2) Normalize edilmiş kategorilerin sayımı
     norm_counts = (
@@ -608,8 +654,7 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         totalN = int(norm_counts["N"].sum())
         norm_counts["%"] = (norm_counts["N"] / totalN * 100).round(2)
     else:
-        # Boşsa tutarlı kolon yapısı bırak
-        norm_counts = pd.DataFrame(columns=["Kategori (normalize)", "N", "%"])
+        norm_counts = pd.DataFrame(columns=["Kategori (normalize)","N","%"])
 
     st.markdown("**Normalize Edilmiş Kategoriler**")
     st.dataframe(norm_counts, use_container_width=True)
@@ -620,22 +665,19 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         mime="text/csv"
     )
 
-    # Kategorik genel frekans/ki-kare tabloları (normalize etiketle)
+    # 3) Kategorik genel frekans/ki-kare (normalize etiketle)
     cat_name = "__CAT__"
     sub = sub.assign(**{cat_name: normalized})
-
     freq_all = (sub[cat_name].value_counts(dropna=False)
                 .rename_axis("Kategori").to_frame("N").reset_index())
     totalN = int(freq_all["N"].sum()) if not freq_all.empty else 0
-    if totalN: 
+    if totalN:
         freq_all["%"] = (freq_all["N"]/totalN*100).round(2)
     else:
         freq_all["%"] = []
-
     freq_by_sex = (sub.pivot_table(index=cat_name, columns="CINSIYET",
                                    values="PROTOKOL_NO", aggfunc="count", fill_value=0)
                    .astype(int).reset_index().rename(columns={cat_name:"Kategori"}))
-
     chi2_msg = "Ki-kare uygulanamadı."
     try:
         from scipy.stats import chi2_contingency
@@ -650,7 +692,6 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     with tabs[0]: st.dataframe(freq_all, use_container_width=True)
     with tabs[1]: st.dataframe(freq_by_sex, use_container_width=True)
     with tabs[2]: st.info(chi2_msg)
-
 
 # ================= Genel Bilgiler ================= #
 st.subheader("🔎 Genel Bilgiler (Birleştirilmiş)")

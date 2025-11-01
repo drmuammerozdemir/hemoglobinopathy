@@ -363,7 +363,19 @@ with right:
     files = [str(x) for x in df["SOURCE_FILE"].dropna().unique()]
     chosen_files = st.multiselect("Dosya filtresi", options=files, default=files)
 
+# --- 99 ile başlayan TCKN filtreleme kontrolü ---
+st.markdown("### 🧾 Veri Filtre Ayarları")
+
+include_99 = st.checkbox(
+    "99 ile başlayan TCKN'leri dahil et",
+    value=False,
+    help="Genelde geçici/dummy kayıtlar için kullanılır. Varsayılan: hariç."
+)
+
 work = df.copy()
+# 99 ile başlayan TCKN'leri filtrele (kullanıcı istemezse)
+if not include_99 and "TCKIMLIK_NO" in work.columns:
+    work = work[~work["TCKIMLIK_NO"].astype(str).str.startswith("99")]
 if chosen_sex:
     work = work[work["CINSIYET"].astype(str).isin(chosen_sex)]
 if chosen_files:

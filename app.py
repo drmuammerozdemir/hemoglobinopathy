@@ -322,7 +322,7 @@ ANORMAL_HB_PATTERNS = [
     (_rx(r"\bhbd\b"), "HbD"),
     (_rx(r"\bhbe\b"), "HbE"),
     (_rx(r"\bhbg\b"), "HbG"),
-    (_rx(r"\hbj\b"), "HbJ"),
+    (_rx(r"\bhbj\b"), "HbJ"),            # <- düzeltilen satır
     (_rx(r"o[- ]?arab|hb ?o\b"), "HbO-Arab"),
     (_rx(r"lepore"), "Hb Lepore"),
     (_rx(r"\bhb ?h\b|\bhemoglobin\s*h\b"), "HbH"),

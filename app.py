@@ -979,7 +979,7 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v4 - SADECE CİNSİYET) ================= #
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v4 - CİNSİYET DÜZELTMESİ) ================= #
 st.header("🔬 Varyantlara Göre Parametre Özeti (Akıllı Format)")
 st.caption("Görseldeki Table 2'ye benzer pivot tablo. Sütun başlıkları gruptaki Kadın (F) ve Erkek (M) protokol sayılarını (n) içerir.")
 
@@ -992,8 +992,11 @@ rename_map = {}
 try:
     # 1. Benzersiz protokol/varyant/cinsiyet kombinasyonlarını al
     data = work[['PROTOKOL_NO', 'VARIANT_TAG', 'CINSIYET']].dropna(subset=['PROTOKOL_NO', 'VARIANT_TAG']).drop_duplicates()
+    
     # 2. Cinsiyeti normalize et (normalize_sex_label fonksiyonu yukarıda tanımlı olmalı)
-    data['Gender_Clean'] = data['CINSIYET'].map(normalize_sex_label).fillna('Bilinmiyor')
+    # --- DÜZELTME BURADA: .astype(str) eklendi ---
+    data['Gender_Clean'] = data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+    
     # 3. Varyant/Cinsiyet bazında grupla ve benzersiz protokolleri say
     grouped_counts = data.groupby(['VARIANT_TAG', 'Gender_Clean'])['PROTOKOL_NO'].nunique()
     # 4. F/M sütunlarını elde etmek için pivot yap

@@ -364,18 +364,26 @@ with right:
     chosen_files = st.multiselect("Dosya filtresi", options=files, default=files)
 
 # --- 99 ile başlayan TCKN filtreleme kontrolü ---
-st.markdown("### 🧾 Veri Filtre Ayarları")
+st.markdown("### 🧾 TCKN Filtre Seçimi")
 
-include_99 = st.checkbox(
-    "99 ile başlayan TCKN'leri dahil et",
-    value=False,
-    help="Genelde geçici/dummy kayıtlar için kullanılır. Varsayılan: hariç."
+tckn_filter = st.selectbox(
+    "TCKN filtrele:",
+    ["Hepsi", "Sadece gerçek TCKN", "Sadece 99'lu TCKN"],
+    index=1,  # Varsayılan: Sadece gerçek TCKN
+    help="99 ile başlayanlar genelde geçici kayıtlardır."
 )
 
 work = df.copy()
-# 99 ile başlayan TCKN'leri filtrele (kullanıcı istemezse)
-if not include_99 and "TCKIMLIK_NO" in work.columns:
-    work = work[~work["TCKIMLIK_NO"].astype(str).str.startswith("99")]
+# --- TCKN filtreleme ---
+if "TCKIMLIK_NO" in work.columns:
+    tckn_str = work["TCKIMLIK_NO"].astype(str)
+
+    if tckn_filter == "Sadece gerçek TCKN":
+        work = work[~tckn_str.str.startswith("99", na=False)]
+
+    elif tckn_filter == "Sadece 99'lu TCKN":
+        work = work[tckn_str.str.startswith("99", na=False)]
+
 if chosen_sex:
     work = work[work["CINSIYET"].astype(str).isin(chosen_sex)]
 if chosen_files:
@@ -775,6 +783,45 @@ for test_name in selected_tests:
 
     stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
     normal_flag   = normality_flag(sub_work["__VAL_NUM__"])
+    # Normalite testi (etiket + p)
+    norm_label, norm_p_disp = normality_test_with_p(sub_work["__VAL_NUM__"])
+
+    # Genel toplama havuzuna ekle
+    overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
+
+    # ----- P değeri yazım kuralı (Türkçe ondalık) -----
+def _fmt_p(p: float) -> str:
+    if p is None or np.isnan(p):
+        return "—"
+    if p < 0.001:
+        return "<0,001"
+    if p < 0.05:
+        return "<0,05"
+    return f"{p:.3f}".replace(".", ",")
+
+# ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
+def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
+    x = pd.to_numeric(series, errors="coerce").dropna()
+    n = len(x)
+    if n < 3:
+        return "yetersiz", "—"
+
+    try:
+        if n <= 5000:
+            stat, p = stats.shapiro(x)
+        else:
+            mu = float(np.mean(x))
+            sd = float(np.std(x, ddof=1))
+            if sd == 0:
+                return "yetersiz", "—"
+            # H0: veri ~ N(mu, sd)
+            stat, p = stats.kstest(x, 'norm', args=(mu, sd))
+
+        label = "normal" if p >= alpha else "non-normal"
+        return label, _fmt_p(p)
+    except Exception:
+        return "bilinmiyor", "—"
+
     by_sex  = (sub_work.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
     by_file = (sub_work.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
@@ -841,7 +888,8 @@ if results_rows:
             "Q1": overall_stats["q1"],
             "Q3": overall_stats["q3"],
             "Max": overall_stats["max"],
-            "Normalite": "—",
+            "Normalite": norm_label,         
+            "p (normalite)": norm_p_disp,     
             "Test": "—",
         }
         res_df = pd.concat([res_df, pd.DataFrame([overall_row])], ignore_index=True)

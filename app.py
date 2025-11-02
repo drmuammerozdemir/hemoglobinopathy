@@ -453,16 +453,12 @@ def _mean_sd(s: pd.Series):
     return "—" if s.empty else f"{s.mean():.2f} ± {s.std(ddof=1):.2f}"
 
 PARAMS = {
-    "Hemogram/HGB":  ("Hb (g/dL)",   "F: 11–15; M: 12–17"),
-    "Hemogram/HCT":  ("HCT (%)",     "F: 36–46; M: 40–53"),
-    "Hemogram/RBC":  ("RBC (×10⁶)",  "F: 3.9–5.6; M: 4.5–6.0"),
-    "Hemogram/RDW":  ("RDW (%)",     "11–16"),
-    "Hemogram/MCV":  ("MCV (fL)",    "80–100"),
-    "Hemogram/MCH":  ("MCH (pg)",    "27–34"),
-    "Hemogram/MCHC": ("MCHC (g/dL)", "32–36"),
     "HbA":           ("HbA (%)",     "94–98"),
     "HbA2 (%)":      ("HbA₂ (%)",    "2–3.5"),
     "A2/":           ("HbA₂ (%)",    "2–3.5"),
+    "HbD (%)":       ("Hb D (%)",    "0–100"),
+    "HbC (%)":       ("Hb C (%)",    "0–100"),
+    "HbE (%)":       ("Hb E (%)",    "0–100"),
     "HbF (%)":       ("Hb F (%)",    "0–2"),
     "F/":            ("Hb F (%)",    "0–2"),
 }

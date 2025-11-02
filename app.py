@@ -308,10 +308,10 @@ def norm_anormal_hb_text(x: str | None):
     if not isinstance(x, str): return None
     s = x.upper().replace("İ","I").strip()
     
-    # YENİ EKLENEN KONTROL
+    # YENİ EKLENEN KONTROL (Genellikle USV veya benzeri metinleri yakalar)
     if re.search(r"\bUSV\b|UNIDENTIFIED|TANIMLANAMAYAN", s): return "USV"
     
-    # MEVCUT KONTROLLER
+    # --- MEVCUT KOD ---
     if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
     if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
     if re.search(r"\bHBC\b", s): return "HbC"

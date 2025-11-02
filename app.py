@@ -307,6 +307,11 @@ def normalize_blood_group(x: str | None):
 def norm_anormal_hb_text(x: str | None):
     if not isinstance(x, str): return None
     s = x.upper().replace("İ","I").strip()
+    
+    # YENİ EKLENEN KONTROL
+    if re.search(r"\bUSV\b|UNIDENTIFIED|TANIMLANAMAYAN", s): return "USV"
+    
+    # MEVCUT KONTROLLER
     if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
     if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
     if re.search(r"\bHBC\b", s): return "HbC"
@@ -456,7 +461,8 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             if not vv.empty and (vv > 0).any():
                 tags.append(var_name)
     if not tags: return None
-    for p in ["Hb S-β-thal","HbS","HbC","HbD","HbE","HbA2↑","HbF↑","Normal"]:
+    # YENİ: "USV" listeye eklendi
+    for p in ["Hb S-β-thal","HbS","HbC","HbD","HbE","USV","HbA2↑","HbF↑","Normal"]:
         if p in tags: return p
     return tags[0]
 
@@ -525,6 +531,9 @@ PARAMS = {
     "D/":            ("HbD (%)",      "0"),   # D için alternatif isim
     "HbE (%)":       ("HbE (%)",      "0"),
     "E/":            ("HbE (%)",      "0"),   # E için alternatif isim
+    # YENİ EKLENEN USV SATIRI (Eğer verinizde "USV/" gibi bir test ismi varsa)
+    "USV/":          ("USV (%)",      "—"),
+    "USV (%)":       ("USV (%)",      "—"),
 }
 
 table_fm = pd.DataFrame()

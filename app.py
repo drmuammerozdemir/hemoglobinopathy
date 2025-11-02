@@ -979,32 +979,51 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - AKILLI v2) ================= #
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v4 - SADECE CİNSİYET) ================= #
 st.header("🔬 Varyantlara Göre Parametre Özeti (Akıllı Format)")
-st.caption("Görseldeki Table 2'ye benzer pivot tablo. Sütun başlıkları gruptaki protokol sayısını (n) içerir.")
+st.caption("Görseldeki Table 2'ye benzer pivot tablo. Sütun başlıkları gruptaki Kadın (F) ve Erkek (M) protokol sayılarını (n) içerir.")
 
 # 1. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) al
 params_to_analyze = list(PARAMS.keys())
 
-# 2. Sütun başlıkları (n=?) için VARYANT_TAG'a sahip benzersiz protokol sayılarını HESAPLA
-#    Bunu, 'work' dataframe'i hemogram testlerine göre FİLTRELENMEDEN ÖNCE yaparız
+# --- YENİ: Cinsiyet bazlı sütun başlıkları (n=? F/M) ---
+# (Bu, 'work' dataframe'i hemogram testlerine göre FİLTRELENMEDEN ÖNCE yapılır)
+rename_map = {}
 try:
-    variant_counts = work[
-        work["VARIANT_TAG"].notna() & work["PROTOKOL_NO"].notna()
-    ].groupby("VARIANT_TAG")["PROTOKOL_NO"].nunique()
+    # 1. Benzersiz protokol/varyant/cinsiyet kombinasyonlarını al
+    data = work[['PROTOKOL_NO', 'VARIANT_TAG', 'CINSIYET']].dropna(subset=['PROTOKOL_NO', 'VARIANT_TAG']).drop_duplicates()
+    # 2. Cinsiyeti normalize et (normalize_sex_label fonksiyonu yukarıda tanımlı olmalı)
+    data['Gender_Clean'] = data['CINSIYET'].map(normalize_sex_label).fillna('Bilinmiyor')
+    # 3. Varyant/Cinsiyet bazında grupla ve benzersiz protokolleri say
+    grouped_counts = data.groupby(['VARIANT_TAG', 'Gender_Clean'])['PROTOKOL_NO'].nunique()
+    # 4. F/M sütunlarını elde etmek için pivot yap
+    counts_pivot = grouped_counts.unstack(fill_value=0)
     
-    # { "HbS": "HbS (n=15)", "HbE": "HbE (n=13)" } gibi bir harita oluştur
-    rename_map = {
-        tag: f"{tag} (n={count})" for tag, count in variant_counts.items()
-    }
-except KeyError:
-    st.warning("Varyant sayıları (n=?) hesaplanamadı. PROTOKOL_NO sütunu eksik olabilir.")
-    rename_map = {} # Harita boş kalır, yeniden adlandırma yapılmaz
+    # 5. Sütun yeniden adlandırma haritasını (rename_map) oluştur
+    for tag, row in counts_pivot.iterrows():
+        f_count = row.get('Kadın', 0)
+        m_count = row.get('Erkek', 0)
+        # Diğer (Bilinmiyor, Çakışma vb.) tüm cinsiyetleri topla
+        o_count = sum(row.get(c, 0) for c in ['Bilinmiyor', 'Çakışma'] if c in row)
+        
+        parts = []
+        if f_count > 0: parts.append(f"F: {f_count}")
+        if m_count > 0: parts.append(f"M: {m_count}")
+        if o_count > 0: parts.append(f"Diğer: {o_count}")
+        
+        if not parts:
+            rename_map[tag] = f"{tag} (n=0)"
+        else:
+            rename_map[tag] = f"{tag} ({', '.join(parts)})"
 
-# 3. Pivot tablo için veriyi FİLTRELE
-#    - VARIANT_TAG'ı olanları (örn. HbS, HbA2↑)
-#    - TETKIK_ISMI, PARAMS listemizde olanları (örn. Hemogram/HGB, HbA2 (%))
-#    - Sayısal değeri olanları
+except KeyError:
+    st.warning("Varyant sayıları (n=? F/M) hesaplanamadı. PROTOKOL_NO veya CINSIYET sütunu eksik olabilir.")
+    rename_map = {} # Harita boş kalır, yeniden adlandırma yapılmaz
+except Exception as e:
+    st.warning(f"Cinsiyet sayımı sırasında bir hata oluştu: {e}")
+    rename_map = {}
+
+# 3. Ana Hemogram/HPLC pivotu için veriyi FİLTRELE
 data_for_pivot = work[
     work["TETKIK_ISMI"].isin(params_to_analyze) &
     work["VARIANT_TAG"].notna() &
@@ -1014,7 +1033,7 @@ data_for_pivot = work[
 if data_for_pivot.empty:
     st.info("Pivot tablo için yeterli veri bulunamadı (Varyantı olan ve hemogram/HPLC parametresi içeren).")
 else:
-    # 4. AKILLI FORMATLAYICI (Süperskript 'a' ve 'b' eklenmiş)
+    # 4. AKILLI FORMATLAYICI (Değişiklik yok)
     def _format_smart_summary_superscript(s: pd.Series):
         s = pd.to_numeric(s, errors="coerce").dropna()
         n = len(s)
@@ -1045,13 +1064,13 @@ else:
             return f"{mean:.2f} ± {std:.2f}ᵃ"
 
     try:
-        # 5. Pivot tabloyu oluştur
+        # 5. Ana Pivot tabloyu oluştur (Hemogram, HPLC, etc.)
         pivot_table = pd.pivot_table(
             data_for_pivot,
             values="__VAL_NUM__",
             index="TETKIK_ISMI",
             columns="VARIANT_TAG",
-            aggfunc=_format_smart_summary_superscript, # GÜNCELLENMİŞ fonksiyon
+            aggfunc=_format_smart_summary_superscript,
             fill_value="—"
         )
 
@@ -1063,36 +1082,37 @@ else:
         ]
         
         if ordered_params_in_table:
-            pivot_table_reindexed = pivot_table.loc[ordered_params_in_table]
-            pivot_table_reindexed.index = pivot_table_reindexed.index.map(display_map)
-            pivot_table_reindexed = pivot_table_reindexed.rename_axis("Parametre")
-
-            # 7. YENİ: Sütunları (n=?) içerecek şekilde yeniden adlandır
+            # Ana pivotu PARAMS sırasına göre düzenle
+            final_pivot_table = pivot_table.loc[ordered_params_in_table]
+            # Index'i güzel isimlerle (Hb (g/dL) vb.) değiştir
+            final_pivot_table.index = final_pivot_table.index.map(display_map)
+            final_pivot_table = final_pivot_table.rename_axis("Parametre")
+            
+            # 7. Sütunları (n=? F/M) yeniden adlandır
             if rename_map:
-                 # Sadece tabloda var olan sütunları yeniden adlandır
                 existing_cols_to_rename = {
-                    col: rename_map[col] for col in pivot_table_reindexed.columns 
+                    col: rename_map[col] for col in final_pivot_table.columns 
                     if col in rename_map
                 }
-                pivot_table_reindexed = pivot_table_reindexed.rename(
+                final_pivot_table = final_pivot_table.rename(
                     columns=existing_cols_to_rename
                 )
 
             # 8. Ekranda göster
-            st.dataframe(pivot_table_reindexed, use_container_width=True)
+            st.dataframe(final_pivot_table, use_container_width=True)
             
-            # 9. YENİ: Açıklamayı (footnote) ekle
+            # 9. Açıklamayı (footnote) ekle
             st.caption("""
                 ᵃ: Normal dağılım gösteren veriler (Mean ± SD)  
                 ᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])
             """)
             
-            # 10. İndirme butonu (güncellenmiş tabloyu indirir)
-            csv_data = pivot_table_reindexed.to_csv(index=True).encode("utf-8-sig")
+            # 10. İndirme butonu
+            csv_data = final_pivot_table.to_csv(index=True).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Pivot Tabloyu İndir (CSV)",
                 data=csv_data,
-                file_name="varyant_pivot_ozet_akilli_v2.csv",
+                file_name="varyant_pivot_ozet_akilli_v4_cinsiyet.csv",
                 mime="text/csv",
             )
         else:
@@ -1100,4 +1120,5 @@ else:
 
     except Exception as e:
         st.error(f"Pivot tablo oluşturulurken bir hata oluştu: {e}")
+
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

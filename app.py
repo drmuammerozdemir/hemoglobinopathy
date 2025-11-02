@@ -719,7 +719,7 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
             )
 
         # 3) Seçince hastanın/protokolün tüm tetkikleri
-        st.markdown("**Hızlı inceleme: bir hasta veya protokol seçin**")
+    st.markdown("**Hızlı inceleme: bir hasta veya protokol seçin**")
         tcs  = sorted({str(x) for x in sub_nonempty.get("TCKIMLIK_NO", pd.Series(dtype=object)).dropna().astype(str)})
         prot = sorted({str(x) for x in sub_nonempty.get("PROTOKOL_NO", pd.Series(dtype=object)).dropna().astype(str)})
 

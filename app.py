@@ -900,63 +900,89 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= VARYANT BAZLI HEMOGRAM VE HPLC ÖZETİ ================= #
-st.header("🩸 Varyantlara Göre Hemogram ve HPLC Özeti")
-st.caption("Bu tablo, yukarıdaki 'VARYANT ÖZETİ' bölümünde tanımlanan `PARAMS` listesindeki (Hemogram/HGB, Hemogram/MCV, HbA2 (%), F/ vb.) tetkikleri kullanır.")
+# ================= VARYANT BAZLI HEMOGRAM/HPLC ÖZET TABLOSU ================= #
+st.header("🩸 Varyant Bazlı Hemogram/HPLC Özeti (Filtreli)")
+st.caption("Aşağıdan bir VARYANT (örn. 'HbS') seçin. Tablo, *sadece o varyanta sahip* hastaların `PARAMS` listesindeki (HGB, MCV, A2, F vb.) parametrelerinin istatistiklerini gösterecektir.")
 
-# PARAMS sözlüğü global scope'ta (yukarıda, ~satır 497) tanımlı olmalı
-# descr_stats_fast fonksiyonu da global scope'ta (~satır 138) olmalı
-if ("PARAMS" in locals() or "PARAMS" in globals()) and ("descr_stats_fast" in locals() or "descr_stats_fast" in globals()):
-    
-    # Analiz edilecek test isimlerini PARAMS'tan al
-    params_to_analyze = list(PARAMS.keys())
-    
-    # Sadece ilgili testleri, varyantı olanları ve sayısal değeri olanları al
-    # 'work' dataframe'i, filtreler uygulandıktan sonraki ana dataframedir.
-    data_subset = work[
-        work["TETKIK_ISMI"].isin(params_to_analyze) &
-        work["VARIANT_TAG"].notna() &
-        work["__VAL_NUM__"].notna()
-    ].copy()
+# 'work' dataframe'inden mevcut, filtrelenmiş varyantları al
+# (Zaten TCKN filtresi, cinsiyet filtresi vb. 'work' df'ine uygulanmıştı)
+available_variants = sorted(work["VARIANT_TAG"].dropna().unique())
 
-    if not data_subset.empty:
-        # Varyant ve Tetkik İsmi bazında gruplayarak istatistikleri hesapla
-        try:
-            grouped = data_subset.groupby(["VARIANT_TAG", "TETKIK_ISMI"])["__VAL_NUM__"]
-            
-            # descr_stats_fast her grup için bir dict döner
-            summary_series = grouped.apply(descr_stats_fast)
-            
-            if not summary_series.empty:
-                # Seri'yi (dict'ler içeren) bir DataFrame'e dönüştür
-                summary_df = pd.DataFrame(summary_series.tolist(), index=summary_series.index).reset_index()
-                
-                # TETKIK_ISMI'ni (örn: "Hemogram/HGB") güzel görünen 'Parametre' ismine (örn: "Hb (g/dL)") çevir
-                display_map = {k: v[0] for k, v in PARAMS.items()}
-                summary_df["Parametre"] = summary_df["TETKIK_ISMI"].map(display_map).fillna(summary_df["TETKIK_ISMI"])
-                
-                # Sütunları yeniden düzenle
-                final_cols = [
-                    "VARIANT_TAG", "Parametre", "count", "mean", "median", 
-                    "std", "min", "q1", "q3", "max", "cv%"
-                ]
-                # Sadece mevcut olan sütunları seç
-                final_cols_exist = [c for c in final_cols if c in summary_df.columns]
-                
-                summary_df_final = summary_df[final_cols_exist].sort_values(by=["VARIANT_TAG", "Parametre"])
-                
-                st.dataframe(summary_df_final, use_container_width=True)
-                export_df(summary_df_final, name="varyant_hemogram_hplc_ozet.csv")
-            else:
-                st.info("Varyant bazlı hemogram özeti için hesaplanacak veri bulunamadı.")
-        
-        except Exception as e:
-            st.error(f"Varyant bazlı hemogram özeti oluşturulurken bir hata oluştu: {e}")
-            
-    else:
-        st.info("Varyant bazlı hemogram özeti için filtrelenmiş veri bulunamadı (Varyantı olan ve hemogram/HPLC parametresi içeren).")
+if not available_variants:
+    st.info("Bu veri setinde (veya filtrenizde) analiz edilecek VARYANT_TAG bulunamadı.")
 else:
-    st.warning("`PARAMS` sözlüğü veya `descr_stats_fast` fonksiyonu bulunamadı. Özet tablosu oluşturulamıyor.")
-# ================= ÖZET SONU ================= #
+    # Kullanıcıya hangi varyantı analiz etmek istediğini sor
+    selected_variant_for_summary = st.selectbox(
+        "Analiz edilecek varyantı seçin:",
+        options=available_variants,
+        index=0,
+        key="variant_summary_selector"
+    )
 
+    if selected_variant_for_summary:
+        st.subheader(f"Özet Tablosu: {selected_variant_for_summary}")
+
+        # 1. Ana 'work' dataframe'ini SADECE seçilen varyanta filtrele
+        variant_data = work[work["VARIANT_TAG"] == selected_variant_for_summary].copy()
+
+        # 2. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) döngüye al
+        #    (PARAMS sözlüğü kodun başında ~satır 497'de tanımlanmıştı)
+        params_to_analyze = PARAMS.keys()
+        
+        variant_summary_rows = []
+
+        if variant_data.empty:
+            st.warning(f"'{selected_variant_for_summary}' için veri bulunamadı.")
+        else:
+            for test_name in params_to_analyze:
+                # 3. Varyant verisini SADECE o hemogram/HPLC testine filtrele
+                sub_test = variant_data[variant_data["TETKIK_ISMI"] == test_name].copy()
+                
+                # Sayısal değerleri al
+                values = pd.to_numeric(sub_test["__VAL_NUM__"], errors="coerce").dropna()
+                
+                if values.empty:
+                    continue # Bu parametre için veri yoksa atla
+
+                # 4. İstatistikleri hesapla
+                stats = descr_stats_fast(values)
+                
+                # 5. Normalite testi yap
+                norm_label, norm_p_disp = normality_test_with_p(values)
+                
+                # 6. Güzel parametre ismini al (örn: "Hb (g/dL)")
+                param_display_name = PARAMS[test_name][0]
+
+                # 7. Sonuçları listeye ekle
+                variant_summary_rows.append({
+                    "Parametre": param_display_name,
+                    "TETKIK_ISMI (Ham)": test_name,
+                    "N": stats["count"],
+                    "Mean": stats["mean"],
+                    "Median": stats["median"],
+                    "Std": stats["std"],
+                    "Min": stats["min"],
+                    "Q1": stats["q1"],
+                    "Q3": stats["q3"],
+                    "Max": stats["max"],
+                    "CV (%)": stats["cv%"],
+                    "Normalite": norm_label,
+                    "p (normalite)": norm_p_disp,
+                })
+            
+            # 8. Döngü bittikten sonra sonuçları DataFrame olarak göster
+            if variant_summary_rows:
+                summary_df_variant = pd.DataFrame(variant_summary_rows)
+                # İstenen sütun sırası
+                cols_order = [
+                    "Parametre", "N", "Mean", "Median", "Std", "Min", 
+                    "Q1", "Q3", "Max", "CV (%)", "Normalite", "p (normalite)", "TETKIK_ISMI (Ham)"
+                ]
+                # Sadece var olan sütunları göster
+                cols_to_show = [c for c in cols_order if c in summary_df_variant.columns]
+                
+                st.dataframe(summary_df_variant[cols_to_show], use_container_width=True)
+                export_df(summary_df_variant[cols_to_show], name=f"ozet_{selected_variant_for_summary}.csv")
+            else:
+                st.info(f"'{selected_variant_for_summary}' varyantı için `PARAMS` listesindeki parametrelere (HGB, MCV, A2...) ait sayısal veri bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

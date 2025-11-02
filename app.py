@@ -900,12 +900,11 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2) ================= #
-st.header("🔬 Varyantlara Göre Parametre Özeti (Mean ± SD)")
-st.caption("Görseldeki Table 2'ye benzer pivot tablo. Satırlar: Parametreler, Sütunlar: Varyantlar.")
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - AKILLI) ================= #
+st.header("🔬 Varyantlara Göre Parametre Özeti (Akıllı Format)")
+st.caption("Görseldeki Table 2'ye benzer pivot tablo. Veri normalse 'Mean ± SD', değilse 'Median [Min-Max]' gösterir.")
 
 # 1. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) al
-#    (PARAMS sözlüğü kodun başında ~satır 497'de tanımlanmıştı)
 params_to_analyze = list(PARAMS.keys())
 
 # 2. 'work' (filtrelenmiş) dataframe'ini al. Sadece:
@@ -921,21 +920,45 @@ data_for_pivot = work[
 if data_for_pivot.empty:
     st.info("Pivot tablo için yeterli veri bulunamadı (Varyantı olan ve hemogram/HPLC parametresi içeren).")
 else:
-    # 3. Mean ± SD formatlayıcı (lokal) fonksiyon
-    #    (Not: Kodunuzdaki _mean_sd fonksiyonu lokal scope'ta olduğu için burada tekrar tanımlıyoruz)
-    def _format_mean_sd(s: pd.Series):
+    # 3. AKILLI FORMATLAYICI (Mean±SD veya Median[Min-Max])
+    #    (Bu fonksiyonun çalışması için 'normality_test_with_p' fonksiyonunun
+    #     kodun başında tanımlanmış olması gerekir!)
+    def _format_smart_summary(s: pd.Series):
         s = pd.to_numeric(s, errors="coerce").dropna()
         if s.empty:
             return "—"
         
-        mean = s.mean()
-        std = s.std(ddof=1) # ddof=1: sample standard deviation
+        n = len(s)
+        if n == 0:
+            return "—"
         
-        # Eğer tek bir değer varsa (std hesaplanamaz, NaN olur)
-        if pd.isna(std) or std == 0:
-            return f"{mean:.2f}"
+        # Eğer sadece 1 değer varsa, direkt onu yaz
+        if n == 1:
+            return f"{s.iloc[0]:.2f}"
+            
+        # Normaliteyi kontrol et (normality_test_with_p gerekli)
+        try:
+            norm_label, _ = normality_test_with_p(s)
+        except Exception:
+            norm_label = "bilinmiyor" # Hata olursa non-normal varsay
         
-        return f"{mean:.2f} ± {std:.2f}"
+        # Yetersiz veri veya non-normal ise: Median [Min-Max]
+        if norm_label != "normal":
+            med = s.median()
+            min_val = s.min()
+            max_val = s.max()
+            return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]"
+        
+        # Normal ise: Mean ± SD
+        else:
+            mean = s.mean()
+            std = s.std(ddof=1) # ddof=1: sample standard deviation
+            
+            # (Tekrar kontrol) std hesaplanamıyorsa (örn. tüm değerler aynıysa)
+            if pd.isna(std) or std == 0:
+                return f"{mean:.2f}"
+            
+            return f"{mean:.2f} ± {std:.2f}"
 
     try:
         # 4. Pivot tabloyu oluştur
@@ -944,41 +967,32 @@ else:
             values="__VAL_NUM__",       # Hücre değerleri
             index="TETKIK_ISMI",      # Satırlar
             columns="VARIANT_TAG",    # Sütunlar
-            aggfunc=_format_mean_sd,  # Hücrede uygulanacak fonksiyon
+            aggfunc=_format_smart_summary, # AKILLI toplama fonksiyonu
             fill_value="—"            # Eksik veriler için "—" yaz
         )
 
         # 5. Satırları (index) daha güzel görünmesi için yeniden adlandır ve sırala
-        #    (örn: "Hemogram/HGB" -> "Hb (g/dL)")
-        
-        # PARAMS sözlüğünden {Ham_İsim: Görünen_İsim} haritası oluştur
         display_map = {k: v[0] for k, v in PARAMS.items()}
         
-        # Tabloda bulunan parametreleri PARAMS'taki sıraya göre al
         ordered_params_in_table = [
             param_key for param_key in PARAMS.keys() 
             if param_key in pivot_table.index
         ]
         
-        # Pivot tabloyu bu sıraya göre yeniden indeksle
         if ordered_params_in_table:
             pivot_table_reindexed = pivot_table.loc[ordered_params_in_table]
-            
-            # İndeksi güzel isimlerle değiştir
             pivot_table_reindexed.index = pivot_table_reindexed.index.map(display_map)
-            
-            # İndeks ismini "Parametre" yap
             pivot_table_reindexed = pivot_table_reindexed.rename_axis("Parametre")
 
             # 6. Ekranda göster
             st.dataframe(pivot_table_reindexed, use_container_width=True)
             
-            # 7. İndirme butonu ekle (index=True olmalı ki parametre isimleri CSV'ye gelsin)
+            # 7. İndirme butonu ekle
             csv_data = pivot_table_reindexed.to_csv(index=True).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Pivot Tabloyu İndir (CSV)",
                 data=csv_data,
-                file_name="varyant_pivot_ozet.csv",
+                file_name="varyant_pivot_ozet_akilli.csv",
                 mime="text/csv",
             )
         else:

@@ -492,19 +492,36 @@ def _mean_sd(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce").dropna()
     return "—" if s.empty else f"{s.mean():.2f} ± {s.std(ddof=1):.2f}"
 
+# --- YENİ VE GENİŞLETİLMİŞ HALİ ---
 PARAMS = {
-    "Hemogram/HGB":  ("Hb (g/dL)",   "F: 11–15; M: 12–17"),
-    "Hemogram/HCT":  ("HCT (%)",     "F: 36–46; M: 40–53"),
-    "Hemogram/RBC":  ("RBC (×10⁶)",  "F: 3.9–5.6; M: 4.5–6.0"),
-    "Hemogram/RDW":  ("RDW (%)",     "11–16"),
-    "Hemogram/MCV":  ("MCV (fL)",    "80–100"),
-    "Hemogram/MCH":  ("MCH (pg)",    "27–34"),
+    # --- Hemogram Parametreleri ---
+    "Hemogram/HGB":  ("Hb (g/dL)",    "F: 11–15; M: 12–17"),
+    "Hemogram/HCT":  ("HCT (%)",      "F: 36–46; M: 40–53"),
+    "Hemogram/RBC":  ("RBC (×10⁶)",   "F: 3.9–5.6; M: 4.5–6.0"),
+    "Hemogram/RDW":  ("RDW (%)",      "11–16"),
+    "Hemogram/MCV":  ("MCV (fL)",     "80–100"),
+    "Hemogram/MCH":  ("MCH (pg)",     "27–34"),
     "Hemogram/MCHC": ("MCHC (g/dL)", "32–36"),
-    "HbA":           ("HbA (%)",     "94–98"),
-    "HbA2 (%)":      ("HbA₂ (%)",    "2–3.5"),
-    "A2/":           ("HbA₂ (%)",    "2–3.5"),
-    "HbF (%)":       ("Hb F (%)",    "0–2"),
-    "F/":            ("Hb F (%)",    "0–2"),
+    # --- Buraya diğer hemogram parametrelerini ekleyin (ÖRN) ---
+    "Hemogram/PLT":  ("PLT (×10³)",   "150-450"),
+    "Hemogram/WBC":  ("WBC (×10³)",   "4.0-11.0"),
+    
+    # --- HPLC Parametreleri (Mevcut) ---
+    "HbA":           ("HbA (%)",      "94–98"),
+    "HbA2 (%)":      ("HbA₂ (%)",     "2–3.5"),
+    "A2/":           ("HbA₂ (%)",     "2–3.5"), # A2 için alternatif isim
+    "HbF (%)":       ("Hb F (%)",     "0–2"),
+    "F/":            ("Hb F (%)",     "0–2"),   # F için alternatif isim
+    
+    # --- YENİ EKLENEN HPLC VARYANTLARI ---
+    "HbS (%)":       ("HbS (%)",      "0"),
+    "S/":            ("HbS (%)",      "0"),   # S için alternatif isim
+    "HbC (%)":       ("HbC (%)",      "0"),
+    "C/":            ("HbC (%)",      "0"),   # C için alternatif isim
+    "HbD (%)":       ("HbD (%)",      "0"),
+    "D/":            ("HbD (%)",      "0"),   # D için alternatif isim
+    "HbE (%)":       ("HbE (%)",      "0"),
+    "E/":            ("HbE (%)",      "0"),   # E için alternatif isim
 }
 
 table_fm = pd.DataFrame()

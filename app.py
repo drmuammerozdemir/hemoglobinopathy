@@ -440,12 +440,28 @@ NUMVAR_FROM_TEST = {"C/":"HbC", "D/":"HbD", "E/":"HbE", "S/":"HbS"}
 def pick_variant_tag(g: pd.DataFrame) -> str | None:
     g = add_numeric_copy(g.copy())
     g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
+    
+    # YENİ - ADIM 1: Önce CLEAN (temizlenmiş) sütununa bak
+    # Kullanıcı "Düzenlenebilir tablo"ya "USV" gibi bir değer yazdıysa,
+    # bu, diğer tüm kuralları ezer (en yüksek öncelik).
+    clean_col = "ANORMAL_HB_CLEAN"
+    if clean_col in g.columns:
+        # Bu protokole ait CLEAN değerlerini al
+        clean_values = g[clean_col].dropna().astype(str)
+        clean_values = clean_values[clean_values != ""]
+        if not clean_values.empty:
+            # Temizlenmiş değeri (örn. "USV", "HbS", "HbC") doğrudan etiket olarak döndür
+            return clean_values.iloc[0] 
+
+    # ADIM 2: CLEAN yoksa, eski mantığa (otomatik sınıflandırma) devam et
     tags = []
-    # 1) Anormal Hb/ metinlerinden
+    
+    # 1) Anormal Hb/ metinlerinden (norm_anormal_hb_text "USV"yi zaten tanıyor olmalı)
     txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
     for v in txt:
         t = norm_anormal_hb_text(v)
         if t: tags.append(t)
+        
     # 2) A2/F erişkin eşikleri
     if g["TETKIK_ISMI"].isin(A2_KEYS).any():
         a2 = g.loc[g["TETKIK_ISMI"].isin(A2_KEYS), "__VAL_NUM__"].dropna()
@@ -453,6 +469,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     if g["TETKIK_ISMI"].isin(F_KEYS).any():
         f = g.loc[g["TETKIK_ISMI"].isin(F_KEYS), "__VAL_NUM__"].dropna()
         if not f.empty and f.max() > 2.0: tags.append("HbF↑")
+        
     # 3) HPLC pikleri
     for k, var_name in NUMVAR_FROM_TEST.items():
         m = g["TETKIK_ISMI"] == k
@@ -460,8 +477,9 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             vv = g.loc[m, "__VAL_NUM__"].dropna()
             if not vv.empty and (vv > 0).any():
                 tags.append(var_name)
+    
     if not tags: return None
-    # YENİ: "USV" listeye eklendi
+    # Öncelik listesi (USV'yi içermeli)
     for p in ["Hb S-β-thal","HbS","HbC","HbD","HbE","USV","HbA2↑","HbF↑","Normal"]:
         if p in tags: return p
     return tags[0]
@@ -647,27 +665,56 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         with col_over:
             overwrite_main = st.checkbox("ORIGINAL sütununu da CLEAN ile değiştir", value=False, key="over_anormalhb")
 
-        if apply_now and not edited.empty:
-            # PROTOKOL_NO + ORIGINAL eşleşmesine göre geri yaz
+if apply_now and not edited.empty:
+            # 1. Düzenlenen satırları (edited) al
             upd = edited[[c for c in ["PROTOKOL_NO","TEST_DEGERI",clean_col] if c in edited.columns]].copy()
             upd.rename(columns={clean_col: "__CLEAN_TMP__"}, inplace=True)
 
             key_proto = work["PROTOKOL_NO"].astype(str) if "PROTOKOL_NO" in work.columns else pd.Series("", index=work.index)
             key_test  = work["TEST_DEGERI"].astype(str).str.strip()
-
+            
+            # 2. 'work' dataframe'inde ilgili satırların CLEAN sütununu güncelle
             for _, r in upd.iterrows():
                 proto = str(r.get("PROTOKOL_NO",""))
                 orig  = str(r.get("TEST_DEGERI","")).strip()
+                # Anahtar: Protokol NO ve Orijinal TEST_DEGERI
                 mask = (key_proto == proto) & (key_test == orig)
+                
                 work.loc[mask, clean_col] = r["__CLEAN_TMP__"]
                 if overwrite_main:
+                    # Orijinali de (isteğe bağlı) değiştir
                     work.loc[mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
-
-            st.success("Anormal Hb/ CLEAN değerleri uygulandı.")
+            
+            # 3. YENİ ve ÖNEMLİ: VARIANT_TAG'İ YENİDEN HESAPLA
+            #    CLEAN sütunu güncellendiği için, tüm 'work' dataframe'i 
+            #    için 'VARIANT_TAG' sütununu SİLİP, yeni 
+            #    pick_variant_tag (Adım 1'de güncellenen) fonksiyonu ile 
+            #    baştan hesaplatıyoruz.
+            st.info("CLEAN değerleri uygulandı, tüm VARIANT_TAG'ler yeniden hesaplanıyor...")
+            
+            if "VARIANT_TAG" in work.columns:
+                work = work.drop(columns="VARIANT_TAG") # Eski tag'leri sil
+            
+            # Tüm 'work' üzerinden tag'leri yeniden hesapla
+            var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
+                           .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
+                           .reset_index())
+            
+            # 'work'e yeni VARIANT_TAG sütununu ekle
+            work = work.merge(var_map, on="PROTOKOL_NO", how="left")
+            
+            # USV Hesaplama bloğunun da (varsa) yeniden çalışması için
+            # 'work'ü tekrar güncelliyoruz.
+            # (Not: Bu kod, bir sonraki adımdaki 'USV (%)' hesaplamasını
+            #  tetiklemez, ancak pivot tabloyu doğru 'work' ile besler.)
+            
+            st.success("VARIANT_TAG'ler başarıyla güncellendi! Pivot tabloyu kontrol edebilirsiniz.")
+            
+            # 4. Güncellenmiş veriyi indirme
             st.download_button(
                 "⬇️ Güncellenmiş veri (CSV)",
                 data=work.to_csv(index=False).encode("utf-8-sig"),
-                file_name="guncellenmis_veri.csv",
+                file_name="guncellenmis_veri_VE_tagler.csv",
                 mime="text/csv",
             )
 

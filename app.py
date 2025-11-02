@@ -900,89 +900,90 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= VARYANT BAZLI HEMOGRAM/HPLC ÖZET TABLOSU ================= #
-st.header("🩸 Varyant Bazlı Hemogram/HPLC Özeti (Filtreli)")
-st.caption("Aşağıdan bir VARYANT (örn. 'HbS') seçin. Tablo, *sadece o varyanta sahip* hastaların `PARAMS` listesindeki (HGB, MCV, A2, F vb.) parametrelerinin istatistiklerini gösterecektir.")
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2) ================= #
+st.header("🔬 Varyantlara Göre Parametre Özeti (Mean ± SD)")
+st.caption("Görseldeki Table 2'ye benzer pivot tablo. Satırlar: Parametreler, Sütunlar: Varyantlar.")
 
-# 'work' dataframe'inden mevcut, filtrelenmiş varyantları al
-# (Zaten TCKN filtresi, cinsiyet filtresi vb. 'work' df'ine uygulanmıştı)
-available_variants = sorted(work["VARIANT_TAG"].dropna().unique())
+# 1. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) al
+#    (PARAMS sözlüğü kodun başında ~satır 497'de tanımlanmıştı)
+params_to_analyze = list(PARAMS.keys())
 
-if not available_variants:
-    st.info("Bu veri setinde (veya filtrenizde) analiz edilecek VARYANT_TAG bulunamadı.")
+# 2. 'work' (filtrelenmiş) dataframe'ini al. Sadece:
+#    - VARIANT_TAG'ı olanları (örn. HbS, HbA2↑)
+#    - TETKIK_ISMI, PARAMS listemizde olanları (örn. Hemogram/HGB, HbA2 (%))
+#    - Sayısal değeri olanları
+data_for_pivot = work[
+    work["TETKIK_ISMI"].isin(params_to_analyze) &
+    work["VARIANT_TAG"].notna() &
+    work["__VAL_NUM__"].notna()
+].copy()
+
+if data_for_pivot.empty:
+    st.info("Pivot tablo için yeterli veri bulunamadı (Varyantı olan ve hemogram/HPLC parametresi içeren).")
 else:
-    # Kullanıcıya hangi varyantı analiz etmek istediğini sor
-    selected_variant_for_summary = st.selectbox(
-        "Analiz edilecek varyantı seçin:",
-        options=available_variants,
-        index=0,
-        key="variant_summary_selector"
-    )
-
-    if selected_variant_for_summary:
-        st.subheader(f"Özet Tablosu: {selected_variant_for_summary}")
-
-        # 1. Ana 'work' dataframe'ini SADECE seçilen varyanta filtrele
-        variant_data = work[work["VARIANT_TAG"] == selected_variant_for_summary].copy()
-
-        # 2. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) döngüye al
-        #    (PARAMS sözlüğü kodun başında ~satır 497'de tanımlanmıştı)
-        params_to_analyze = PARAMS.keys()
+    # 3. Mean ± SD formatlayıcı (lokal) fonksiyon
+    #    (Not: Kodunuzdaki _mean_sd fonksiyonu lokal scope'ta olduğu için burada tekrar tanımlıyoruz)
+    def _format_mean_sd(s: pd.Series):
+        s = pd.to_numeric(s, errors="coerce").dropna()
+        if s.empty:
+            return "—"
         
-        variant_summary_rows = []
+        mean = s.mean()
+        std = s.std(ddof=1) # ddof=1: sample standard deviation
+        
+        # Eğer tek bir değer varsa (std hesaplanamaz, NaN olur)
+        if pd.isna(std) or std == 0:
+            return f"{mean:.2f}"
+        
+        return f"{mean:.2f} ± {std:.2f}"
 
-        if variant_data.empty:
-            st.warning(f"'{selected_variant_for_summary}' için veri bulunamadı.")
-        else:
-            for test_name in params_to_analyze:
-                # 3. Varyant verisini SADECE o hemogram/HPLC testine filtrele
-                sub_test = variant_data[variant_data["TETKIK_ISMI"] == test_name].copy()
-                
-                # Sayısal değerleri al
-                values = pd.to_numeric(sub_test["__VAL_NUM__"], errors="coerce").dropna()
-                
-                if values.empty:
-                    continue # Bu parametre için veri yoksa atla
+    try:
+        # 4. Pivot tabloyu oluştur
+        pivot_table = pd.pivot_table(
+            data_for_pivot,
+            values="__VAL_NUM__",       # Hücre değerleri
+            index="TETKIK_ISMI",      # Satırlar
+            columns="VARIANT_TAG",    # Sütunlar
+            aggfunc=_format_mean_sd,  # Hücrede uygulanacak fonksiyon
+            fill_value="—"            # Eksik veriler için "—" yaz
+        )
 
-                # 4. İstatistikleri hesapla
-                stats = descr_stats_fast(values)
-                
-                # 5. Normalite testi yap
-                norm_label, norm_p_disp = normality_test_with_p(values)
-                
-                # 6. Güzel parametre ismini al (örn: "Hb (g/dL)")
-                param_display_name = PARAMS[test_name][0]
-
-                # 7. Sonuçları listeye ekle
-                variant_summary_rows.append({
-                    "Parametre": param_display_name,
-                    "TETKIK_ISMI (Ham)": test_name,
-                    "N": stats["count"],
-                    "Mean": stats["mean"],
-                    "Median": stats["median"],
-                    "Std": stats["std"],
-                    "Min": stats["min"],
-                    "Q1": stats["q1"],
-                    "Q3": stats["q3"],
-                    "Max": stats["max"],
-                    "CV (%)": stats["cv%"],
-                    "Normalite": norm_label,
-                    "p (normalite)": norm_p_disp,
-                })
+        # 5. Satırları (index) daha güzel görünmesi için yeniden adlandır ve sırala
+        #    (örn: "Hemogram/HGB" -> "Hb (g/dL)")
+        
+        # PARAMS sözlüğünden {Ham_İsim: Görünen_İsim} haritası oluştur
+        display_map = {k: v[0] for k, v in PARAMS.items()}
+        
+        # Tabloda bulunan parametreleri PARAMS'taki sıraya göre al
+        ordered_params_in_table = [
+            param_key for param_key in PARAMS.keys() 
+            if param_key in pivot_table.index
+        ]
+        
+        # Pivot tabloyu bu sıraya göre yeniden indeksle
+        if ordered_params_in_table:
+            pivot_table_reindexed = pivot_table.loc[ordered_params_in_table]
             
-            # 8. Döngü bittikten sonra sonuçları DataFrame olarak göster
-            if variant_summary_rows:
-                summary_df_variant = pd.DataFrame(variant_summary_rows)
-                # İstenen sütun sırası
-                cols_order = [
-                    "Parametre", "N", "Mean", "Median", "Std", "Min", 
-                    "Q1", "Q3", "Max", "CV (%)", "Normalite", "p (normalite)", "TETKIK_ISMI (Ham)"
-                ]
-                # Sadece var olan sütunları göster
-                cols_to_show = [c for c in cols_order if c in summary_df_variant.columns]
-                
-                st.dataframe(summary_df_variant[cols_to_show], use_container_width=True)
-                export_df(summary_df_variant[cols_to_show], name=f"ozet_{selected_variant_for_summary}.csv")
-            else:
-                st.info(f"'{selected_variant_for_summary}' varyantı için `PARAMS` listesindeki parametrelere (HGB, MCV, A2...) ait sayısal veri bulunamadı.")
+            # İndeksi güzel isimlerle değiştir
+            pivot_table_reindexed.index = pivot_table_reindexed.index.map(display_map)
+            
+            # İndeks ismini "Parametre" yap
+            pivot_table_reindexed = pivot_table_reindexed.rename_axis("Parametre")
+
+            # 6. Ekranda göster
+            st.dataframe(pivot_table_reindexed, use_container_width=True)
+            
+            # 7. İndirme butonu ekle (index=True olmalı ki parametre isimleri CSV'ye gelsin)
+            csv_data = pivot_table_reindexed.to_csv(index=True).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Pivot Tabloyu İndir (CSV)",
+                data=csv_data,
+                file_name="varyant_pivot_ozet.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("Pivot tablo oluşturuldu ancak `PARAMS` listesiyle eşleşen parametre bulunamadı.")
+
+    except Exception as e:
+        st.error(f"Pivot tablo oluşturulurken bir hata oluştu: {e}")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

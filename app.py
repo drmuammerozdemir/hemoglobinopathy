@@ -665,7 +665,7 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         with col_over:
             overwrite_main = st.checkbox("ORIGINAL sütununu da CLEAN ile değiştir", value=False, key="over_anormalhb")
 
-if apply_now and not edited.empty:
+    if apply_now and not edited.empty:
             # 1. Düzenlenen satırları (edited) al
             upd = edited[[c for c in ["PROTOKOL_NO","TEST_DEGERI",clean_col] if c in edited.columns]].copy()
             upd.rename(columns={clean_col: "__CLEAN_TMP__"}, inplace=True)

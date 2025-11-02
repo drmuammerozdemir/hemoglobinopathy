@@ -510,6 +510,9 @@ PARAMS = {
     "HbA":           ("HbA (%)",      "94–98"),
     "HbA2 (%)":      ("HbA₂ (%)",     "2–3.5"),
     "A2/":           ("HbA₂ (%)",     "2–3.5"), # A2 için alternatif isim
+    "Talasemi(HPLC) (A0)/":           ("HbA (%)",      "94–98"),
+    "HbA0 (%)":      ("HbA₂ (%)",     "94–98"),
+    "A0/":           ("HbA₂ (%)",     "94–98"), # A0 için alternatif isim
     "HbF (%)":       ("Hb F (%)",     "0–2"),
     "F/":            ("Hb F (%)",     "0–2"),   # F için alternatif isim
     

@@ -1,4 +1,3 @@
-# ==== FILE START ====
 # app.py
 # -*- coding: utf-8 -*-
 """
@@ -10,9 +9,9 @@
 - Grafikler isteğe bağlı (matplotlib; renk set edilmez)
 - Kategorik analizlerde SAĞLAM normalizasyon:
     • Kan Grubu: A/B/AB/O/0 + Rh(+/-/poz/neg/rh+/rh-) → tek tipe
-    • Anormal Hb: HbS/HbC/HbD/HbE/HbG/HbJ/HbO-Arab/Hb Lepore/HbH/Hb Bart’s/HbA2↑/HbF↑/Normal/β-thal trait/α-thal trait …
-- Hem ham yazımlar hem normalize kategoriler ayrı tablolar/CSV
-- Ham yazımdan hasta/protokol seçerek tüm tetkikleri göster
+    • Anormal Hb: HbS/HbC/HbD/HbE/HbA2↑/HbF↑/Normal
+- Hem ham yazımlar hem normalize edilmiş kategoriler ayrı tablolar/CSV
+- Ham yazımdan hasta/protokol seçerek hastanın/protokolün tüm tetkiklerini göster
 
 Çalıştırma:
     streamlit run app.py
@@ -49,13 +48,10 @@ THRESHOLDS = {
 }
 GT_ZERO_DEFAULT = {
     "HbS (%)","HbC (%)","HbD (%)","HbE (%)","HbF (%)","HbA2 (%)","A2/","F/",
-    "C/","D/","E/","S/","G/","J/","O/"
+    "C/","D/","E/","S/"
 }
 VARIANT_NUMERIC_TESTS = {
-    # HPLC/CE kısa test isimleri → Normalleştirilmiş varyant etiketi
-    "HbS (%)":"HbS","HbC (%)":"HbC","HbD (%)":"HbD","HbE (%)":"HbE","HbF (%)":"HbF↑","HbA2 (%)":"HbA2↑",
-    "C/":"HbC","D/":"HbD","E/":"HbE","S/":"HbS",
-    "G/":"HbG","J/":"HbJ","O/":"HbO-Arab"
+    "HbS (%)","HbC (%)","HbD (%)","HbE (%)","HbF (%)","HbA2 (%)","Anormal Hb/"
 }
 
 DISPLAY_LIMIT = 400
@@ -168,49 +164,16 @@ def descr_stats_fast(x: pd.Series) -> dict:
     return {"count":int(x.size),"mean":mean,"std":std,"min":float(x.min()),"q1":float(q[0]),"median":float(q[1]),"q3":float(q[2]),"max":float(x.max()),"cv%":float(cv),"iqr":float(q[2]-q[0])}
 
 
-# ----- P değeri yazım kuralı (Türkçe ondalık) -----
-def _fmt_p(p: float) -> str:
-    if p is None or np.isnan(p):
-        return "—"
-    if p < 0.001:
-        return "<0,001"
-    if p < 0.05:
-        return "<0,05"
-    return f"{p:.3f}".replace(".", ",")
-
-
-# ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
-def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
-    x = pd.to_numeric(series, errors="coerce").dropna()
-    n = len(x)
-    if n < 3:
-        return "yetersiz", "—"
-    try:
-        if n <= 5000:
-            stat, p = stats.shapiro(x)
-        else:
-            mu = float(np.mean(x))
-            sd = float(np.std(x, ddof=1))
-            if sd == 0:
-                return "yetersiz", "—"
-            stat, p = stats.kstest(x, 'norm', args=(mu, sd))  # H0: N(mu, sd)
-        label = "normal" if p >= alpha else "non-normal"
-        return label, _fmt_p(p)
-    except Exception:
-        return "bilinmiyor", "—"
-
-
 def normality_flag(x: pd.Series, alpha=0.05) -> str:
     x = pd.to_numeric(x, errors="coerce").dropna()
-    if len(x) < 3:
-        return "yetersiz"
+    if len(x) < 3: return "yetersiz"
     try:
         if len(x) <= 5000:
-            _, p = stats.shapiro(x)
+            stat, p = stats.shapiro(x)
             return "normal" if p >= alpha else "non-normal"
         else:
             res = stats.anderson(x, dist="norm")
-            crit = res.critical_values[2]  # ~%5
+            crit = res.critical_values[2]
             return "normal" if res.statistic < crit else "non-normal"
     except Exception:
         return "bilinmiyor"
@@ -279,8 +242,8 @@ def export_df(df, name="export.csv"):
 # ======== ÖZEL: Kategorik normalizasyon fonksiyonları ======== #
 def normalize_blood_group(x: str | None):
     """
-    'A Rh (+) Pozitif' -> 'A Rh(+)', 'O Rh -' -> 'O Rh(-)', '0 +' -> 'O Rh(+)'.
-    Anlaşılmazsa None döner.
+    'A Rh (+) Pozitif' -> 'A Rh(+)', 'O Rh -' -> 'O Rh(-)', '0 +' -> 'O Rh(+)'
+    metin anlaşılmazsa None döner.
     """
     if not isinstance(x, str): return None
     u = x.strip().upper().replace("İ", "I")
@@ -309,38 +272,17 @@ def normalize_blood_group(x: str | None):
     return f"{abo or ''} {rh or ''}".strip()
 
 
-def _rx(pattern):  # küçük yardımcı
-    return re.compile(pattern, flags=re.I)
-
-
-# Normalizasyon: Anormal Hb metinlerinden geniş varyant seti
-ANORMAL_HB_PATTERNS = [
-    (_rx(r"(s-?\s*beta|s *β|s[- ]?beta[- ]?tal)"), "Hb S-β-thal"),
-    (_rx(r"\b(hbs?|sickle)\b.*(trait|het|carrier|tasiy|taşiy)"), "HbS trait"),
-    (_rx(r"\b(hbs?)\b"), "HbS"),
-    (_rx(r"\bhbc\b"), "HbC"),
-    (_rx(r"\bhbd\b"), "HbD"),
-    (_rx(r"\bhbe\b"), "HbE"),
-    (_rx(r"\bhbg\b"), "HbG"),
-    (_rx(r"\bhbj\b"), "HbJ"),            # <- düzeltilen satır
-    (_rx(r"o[- ]?arab|hb ?o\b"), "HbO-Arab"),
-    (_rx(r"lepore"), "Hb Lepore"),
-    (_rx(r"\bhb ?h\b|\bhemoglobin\s*h\b"), "HbH"),
-    (_rx(r"bart'?s|barts|\bhb\s*bart"), "Hb Bart’s"),
-    (_rx(r"\bhba2\b|a2\b|h?b?\s*a2\s*(yuk|art|↑|\+)|a2\s*high"), "HbA2↑"),
-    (_rx(r"\bhbf\b|\bf\b|h?b?\s*f\s*(yuk|art|↑|\+)"), "HbF↑"),
-    (_rx(r"beta.*(thal|talas)|β.*thal"), "β-thal trait"),
-    (_rx(r"alpha.*(thal|talas)|α.*thal"), "α-thal trait"),
-    (_rx(r"\bnormal\b|neg(atif)?|(-)\s?bulunmadı"), "Normal"),
-]
-
 def norm_anormal_hb_text(x: str | None):
     if not isinstance(x, str): return None
-    s = x.strip()
-    if not s: return None
-    for rx, label in ANORMAL_HB_PATTERNS:
-        if rx.search(s):
-            return label
+    s = x.upper().replace("İ","I").strip()
+    if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
+    if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
+    if re.search(r"\bHBC\b", s): return "HbC"
+    if re.search(r"\bHBD\b", s): return "HbD"
+    if re.search(r"\bHBE\b", s): return "HbE"
+    if re.search(r"\bA2\b|HBA2", s): return "HbA2↑"
+    if re.search(r"\bF\b|HBF", s): return "HbF↑"
+    if re.search(r"\bNORMAL\b|NEG", s): return "Normal"
     return None
 
 
@@ -456,30 +398,17 @@ work = add_numeric_copy(work)
 # ================= VARYANT ÖZETİ (etiketleme) ================= #
 A2_KEYS = {"A2/","HbA2","HbA2 (%)","Hb A2","Hb A2 (%)"}
 F_KEYS  = {"F/","HbF","HbF (%)","Hb F","Hb F (%)"}
-
-# Öncelik sırası (varsa bu sırayla tercih edilir)
-PRIORITY_ORDER = [
-    "Hb S-β-thal","Sickle cell disease","HbS","HbS trait",
-    "HbC","HbD","HbE","HbG","HbJ","HbO-Arab","Hb Lepore","HbH","Hb Bart’s",
-    "β-thal trait","α-thal trait",
-    "HbA2↑","HbF↑","Normal"
-]
-
-def _priority_key(tag: str) -> int:
-    try: return PRIORITY_ORDER.index(tag)
-    except ValueError: return len(PRIORITY_ORDER) + 1  # listede yoksa en sona
+NUMVAR_FROM_TEST = {"C/":"HbC", "D/":"HbD", "E/":"HbE", "S/":"HbS"}
 
 def pick_variant_tag(g: pd.DataFrame) -> str | None:
     g = add_numeric_copy(g.copy())
     g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
     tags = []
-
     # 1) Anormal Hb/ metinlerinden
     txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
     for v in txt:
         t = norm_anormal_hb_text(v)
         if t: tags.append(t)
-
     # 2) A2/F erişkin eşikleri
     if g["TETKIK_ISMI"].isin(A2_KEYS).any():
         a2 = g.loc[g["TETKIK_ISMI"].isin(A2_KEYS), "__VAL_NUM__"].dropna()
@@ -487,22 +416,17 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     if g["TETKIK_ISMI"].isin(F_KEYS).any():
         f = g.loc[g["TETKIK_ISMI"].isin(F_KEYS), "__VAL_NUM__"].dropna()
         if not f.empty and f.max() > 2.0: tags.append("HbF↑")
-
-    # 3) HPLC/CE piklerinden (pozitifse)
-    for k, var_name in VARIANT_NUMERIC_TESTS.items():
+    # 3) HPLC pikleri
+    for k, var_name in NUMVAR_FROM_TEST.items():
         m = g["TETKIK_ISMI"] == k
         if m.any():
             vv = g.loc[m, "__VAL_NUM__"].dropna()
             if not vv.empty and (vv > 0).any():
                 tags.append(var_name)
-
-    if not tags:
-        return None
-
-    # En öncelikli etiketi seç
-    tags_unique = sorted(set(tags), key=_priority_key)
-    return tags_unique[0]
-
+    if not tags: return None
+    for p in ["Hb S-β-thal","HbS","HbC","HbD","HbE","HbA2↑","HbF↑","Normal"]:
+        if p in tags: return p
+    return tags[0]
 
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
@@ -511,9 +435,8 @@ if "VARIANT_TAG" not in work.columns:
     work = work.merge(var_map, on="PROTOKOL_NO", how="left")
 
 st.header("📋 Varyant Özeti — erişkin eşikleri ile")
-
-# <- SABİT LİSTE YOK: Dinamik!
-present = sorted([t for t in set(work["VARIANT_TAG"].dropna())], key=_priority_key)
+present = [t for t in ["Hb S-β-thal","HbS","HbC","HbD","HbE","HbA2↑","HbF↑","Normal"]
+           if t in set(work["VARIANT_TAG"].dropna())]
 variant_choice = st.selectbox("Varyant seç:", ["(Tümü)"] + present, index=0)
 
 base_v = work.copy()
@@ -717,9 +640,10 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
             else:
                 st.info("Seçilebilir protokol yok.")
 
-        continue  # Kan Grubu/ akışına geç
+        # Bu özel akışta frekans/ki-kare göstermiyoruz.
+        continue  # >>> döngünün geri kalanını Kan Grubu/ için çalıştır
 
-    # ============ STANDART AKIŞ: KAN GRUBU/ ============
+    # ============ STANDART AKIŞ: KAN GRUBU/ (mevcut mantığınız) ============
     # 1) Ham yazımların sayımı
     sub_text = raw_text[raw_text.str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]
     if sub_text.empty:
@@ -740,7 +664,7 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         mime="text/csv"
     )
 
-    # 2) Normalize kategorilerin sayımı
+    # 2) Normalize edilmiş kategorilerin sayımı
     norm_counts = (
         normalized.value_counts(dropna=False)
         .rename_axis("Kategori (normalize)")
@@ -761,7 +685,7 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         mime="text/csv"
     )
 
-    # 3) Kategorik genel frekans/ki-kare
+    # 3) Kategorik genel frekans/ki-kare (normalize etiketle)
     cat_name = "__CAT__"
     sub = sub.assign(**{cat_name: normalized})
     freq_all = (sub[cat_name].value_counts(dropna=False)
@@ -824,11 +748,13 @@ with colB:
 # ================= Tetkik Bazlı Analiz (Seçim) ================= #
 st.header("📊 Tetkik Bazlı Analiz (Seçim)")
 results_rows = []
-overall_pool = []  # GENEL HAVUZ
-
 for test_name in selected_tests:
+    # === BEGIN PATCH: overall pool for global stats ===
+    overall_pool = []
+    # === END PATCH ===
     if test_name in CATEGORICAL_TESTS:
-        continue  # Kan Grubu/ & Anormal Hb/ üstte işlendi
+        # Kan Grubu/ ve Anormal Hb/ yukarıda özel blokta analiz edildi
+        continue
 
     sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
     if sub.empty: 
@@ -855,27 +781,18 @@ for test_name in selected_tests:
         st.warning("Filtre sonrası satır bulunamadı."); 
         continue
 
-    # Tanımlayıcılar ve normalite
     stats_overall = descr_stats_fast(sub_work["__VAL_NUM__"])
-    normal_flag_label   = normality_flag(sub_work["__VAL_NUM__"])
-    norm_label, norm_p_disp = normality_test_with_p(sub_work["__VAL_NUM__"])
-
-    # GENEL havuza değer ekle
-    overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
-
-    # Kırılımlar
+    normal_flag   = normality_flag(sub_work["__VAL_NUM__"])
     by_sex  = (sub_work.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
     by_file = (sub_work.groupby("SOURCE_FILE", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()
     _msg_df = sub_work.rename(columns={"__VAL_NUM__": "VAL"})
     msg, _ = nonparametric_test_by_group(_msg_df, "VAL", "CINSIYET")
+    # === BEGIN PATCH: collect values for global stats ===
+    overall_pool.extend(pd.to_numeric(_msg_df["VAL"], errors="coerce").dropna().tolist())
+    # === END PATCH ===
 
-    # Sonuç satırı
-    mean_pm_sd = (
-        "—" if np.isnan(stats_overall["mean"]) or np.isnan(stats_overall["std"])
-        else f"{stats_overall['mean']:.2f} ± {stats_overall['std']:.2f}"
-    )
 
     results_rows.append({
         "TETKIK_ISMI": test_name,
@@ -883,13 +800,11 @@ for test_name in selected_tests:
         "Mean": stats_overall["mean"],
         "Median": stats_overall["median"],
         "Std": stats_overall["std"],
-        "Mean ± SD": mean_pm_sd,
         "Min": stats_overall["min"],
         "Q1": stats_overall["q1"],
         "Q3": stats_overall["q3"],
         "Max": stats_overall["max"],
-        "Normalite": normal_flag_label,
-        "p (normalite)": norm_p_disp,
+        "Normalite": normal_flag,
         "Test": msg
     })
 
@@ -920,37 +835,28 @@ for test_name in selected_tests:
 if results_rows:
     st.header("🧾 Toplu Özet Tablosu (Seçili Tetkikler)")
     res_df = pd.DataFrame(results_rows)
-
-    # === GENEL TOPLAM ===
+    # === BEGIN PATCH: append global total row ===
     if len(overall_pool) > 0:
-        overall_series = pd.Series(overall_pool)
-        overall_stats = descr_stats_fast(overall_series)
-        overall_norm_label, overall_norm_p = normality_test_with_p(overall_series)
-
-        mean_pm_sd_overall = (
-            "—" if np.isnan(overall_stats["mean"]) or np.isnan(overall_stats["std"])
-            else f"{overall_stats['mean']:.2f} ± {overall_stats['std']:.2f}"
-        )
-
+        overall_stats = descr_stats_fast(pd.Series(overall_pool))
+        # N'yi tek tek testlerden de toplayabiliriz ama havuz zaten filtre-sonrası gerçek toplamı temsil ediyor
         overall_row = {
             "TETKIK_ISMI": "GENEL TOPLAM",
             "N": overall_stats["count"],
             "Mean": overall_stats["mean"],
             "Median": overall_stats["median"],
             "Std": overall_stats["std"],
-            "Mean ± SD": mean_pm_sd_overall,
             "Min": overall_stats["min"],
             "Q1": overall_stats["q1"],
             "Q3": overall_stats["q3"],
             "Max": overall_stats["max"],
-            "Normalite": overall_norm_label,
-            "p (normalite)": overall_norm_p,
+            "Normalite": "—",
             "Test": "—",
         }
         res_df = pd.concat([res_df, pd.DataFrame([overall_row])], ignore_index=True)
+    # === END PATCH ===
 
+    
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-st.caption("Not: Varyant listesi dinamiktir; Anormal Hb metinleri ve HPLC/CE pikleri ile tespit edilen TÜM etiketler frekans tablosuna yansır.")
-# ==== FILE END ====
+st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

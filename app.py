@@ -72,6 +72,38 @@ def coerce_numeric(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.replace(",", ".", regex=False).str.replace(" ", "", regex=False)
     return pd.to_numeric(s, errors="coerce")
 
+# ----- P değeri yazım kuralı (Türkçe ondalık) -----
+def _fmt_p(p: float) -> str:
+    if p is None or np.isnan(p):
+        return "—"
+    if p < 0.001:
+        return "<0,001"
+    if p < 0.05:
+        return "<0,05"
+    return f"{p:.3f}".replace(".", ",")
+
+# ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
+def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
+    x = pd.to_numeric(series, errors="coerce").dropna()
+    n = len(x)
+    if n < 3:
+        return "yetersiz", "—"
+
+    try:
+        if n <= 5000:
+            stat, p = stats.shapiro(x)
+        else:
+            mu = float(np.mean(x))
+            sd = float(np.std(x, ddof=1))
+            if sd == 0:
+                return "yetersiz", "—"
+            # H0: veri ~ N(mu, sd)
+            stat, p = stats.kstest(x, 'norm', args=(mu, sd))
+
+        label = "normal" if p >= alpha else "non-normal"
+        return label, _fmt_p(p)
+    except Exception:
+        return "bilinmiyor", "—"
 
 def add_numeric_copy(frame, src_col="TEST_DEGERI", out_col="__VAL_NUM__"):
     if out_col not in frame.columns:
@@ -789,38 +821,7 @@ for test_name in selected_tests:
     # Genel toplama havuzuna ekle
     overall_pool.extend(pd.to_numeric(sub_work["__VAL_NUM__"], errors="coerce").dropna().tolist())
 
-    # ----- P değeri yazım kuralı (Türkçe ondalık) -----
-def _fmt_p(p: float) -> str:
-    if p is None or np.isnan(p):
-        return "—"
-    if p < 0.001:
-        return "<0,001"
-    if p < 0.05:
-        return "<0,05"
-    return f"{p:.3f}".replace(".", ",")
 
-# ----- Normalite testi: n<=5000 Shapiro; büyük n KS (N(μ,σ)) -----
-def normality_test_with_p(series: pd.Series, alpha: float = 0.05):
-    x = pd.to_numeric(series, errors="coerce").dropna()
-    n = len(x)
-    if n < 3:
-        return "yetersiz", "—"
-
-    try:
-        if n <= 5000:
-            stat, p = stats.shapiro(x)
-        else:
-            mu = float(np.mean(x))
-            sd = float(np.std(x, ddof=1))
-            if sd == 0:
-                return "yetersiz", "—"
-            # H0: veri ~ N(mu, sd)
-            stat, p = stats.kstest(x, 'norm', args=(mu, sd))
-
-        label = "normal" if p >= alpha else "non-normal"
-        return label, _fmt_p(p)
-    except Exception:
-        return "bilinmiyor", "—"
 
     by_sex  = (sub_work.groupby("CINSIYET", dropna=False)["__VAL_NUM__"]
                .agg(count="count", mean="mean", std="std", min="min", median="median", max="max")).reset_index()

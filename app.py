@@ -920,14 +920,29 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - AKILLI) ================= #
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - AKILLI v2) ================= #
 st.header("🔬 Varyantlara Göre Parametre Özeti (Akıllı Format)")
-st.caption("Görseldeki Table 2'ye benzer pivot tablo. Veri normalse 'Mean ± SD', değilse 'Median [Min-Max]' gösterir.")
+st.caption("Görseldeki Table 2'ye benzer pivot tablo. Sütun başlıkları gruptaki protokol sayısını (n) içerir.")
 
 # 1. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) al
 params_to_analyze = list(PARAMS.keys())
 
-# 2. 'work' (filtrelenmiş) dataframe'ini al. Sadece:
+# 2. Sütun başlıkları (n=?) için VARYANT_TAG'a sahip benzersiz protokol sayılarını HESAPLA
+#    Bunu, 'work' dataframe'i hemogram testlerine göre FİLTRELENMEDEN ÖNCE yaparız
+try:
+    variant_counts = work[
+        work["VARIANT_TAG"].notna() & work["PROTOKOL_NO"].notna()
+    ].groupby("VARIANT_TAG")["PROTOKOL_NO"].nunique()
+    
+    # { "HbS": "HbS (n=15)", "HbE": "HbE (n=13)" } gibi bir harita oluştur
+    rename_map = {
+        tag: f"{tag} (n={count})" for tag, count in variant_counts.items()
+    }
+except KeyError:
+    st.warning("Varyant sayıları (n=?) hesaplanamadı. PROTOKOL_NO sütunu eksik olabilir.")
+    rename_map = {} # Harita boş kalır, yeniden adlandırma yapılmaz
+
+# 3. Pivot tablo için veriyi FİLTRELE
 #    - VARIANT_TAG'ı olanları (örn. HbS, HbA2↑)
 #    - TETKIK_ISMI, PARAMS listemizde olanları (örn. Hemogram/HGB, HbA2 (%))
 #    - Sayısal değeri olanları
@@ -940,60 +955,49 @@ data_for_pivot = work[
 if data_for_pivot.empty:
     st.info("Pivot tablo için yeterli veri bulunamadı (Varyantı olan ve hemogram/HPLC parametresi içeren).")
 else:
-    # 3. AKILLI FORMATLAYICI (Mean±SD veya Median[Min-Max])
-    #    (Bu fonksiyonun çalışması için 'normality_test_with_p' fonksiyonunun
-    #     kodun başında tanımlanmış olması gerekir!)
-    def _format_smart_summary(s: pd.Series):
+    # 4. AKILLI FORMATLAYICI (Süperskript 'a' ve 'b' eklenmiş)
+    def _format_smart_summary_superscript(s: pd.Series):
         s = pd.to_numeric(s, errors="coerce").dropna()
-        if s.empty:
-            return "—"
-        
         n = len(s)
+        
         if n == 0:
             return "—"
-        
-        # Eğer sadece 1 değer varsa, direkt onu yaz
         if n == 1:
             return f"{s.iloc[0]:.2f}"
             
-        # Normaliteyi kontrol et (normality_test_with_p gerekli)
         try:
             norm_label, _ = normality_test_with_p(s)
         except Exception:
-            norm_label = "bilinmiyor" # Hata olursa non-normal varsay
+            norm_label = "bilinmiyor"
         
-        # Yetersiz veri veya non-normal ise: Median [Min-Max]
+        # Yetersiz veri veya non-normal ise: Median [Min-Max] + 'b'
         if norm_label != "normal":
             med = s.median()
             min_val = s.min()
             max_val = s.max()
-            return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]"
+            return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]ᵇ"
         
-        # Normal ise: Mean ± SD
+        # Normal ise: Mean ± SD + 'a'
         else:
             mean = s.mean()
-            std = s.std(ddof=1) # ddof=1: sample standard deviation
-            
-            # (Tekrar kontrol) std hesaplanamıyorsa (örn. tüm değerler aynıysa)
+            std = s.std(ddof=1)
             if pd.isna(std) or std == 0:
                 return f"{mean:.2f}"
-            
-            return f"{mean:.2f} ± {std:.2f}"
+            return f"{mean:.2f} ± {std:.2f}ᵃ"
 
     try:
-        # 4. Pivot tabloyu oluştur
+        # 5. Pivot tabloyu oluştur
         pivot_table = pd.pivot_table(
             data_for_pivot,
-            values="__VAL_NUM__",       # Hücre değerleri
-            index="TETKIK_ISMI",      # Satırlar
-            columns="VARIANT_TAG",    # Sütunlar
-            aggfunc=_format_smart_summary, # AKILLI toplama fonksiyonu
-            fill_value="—"            # Eksik veriler için "—" yaz
+            values="__VAL_NUM__",
+            index="TETKIK_ISMI",
+            columns="VARIANT_TAG",
+            aggfunc=_format_smart_summary_superscript, # GÜNCELLENMİŞ fonksiyon
+            fill_value="—"
         )
 
-        # 5. Satırları (index) daha güzel görünmesi için yeniden adlandır ve sırala
+        # 6. Satırları (index) yeniden adlandır ve sırala
         display_map = {k: v[0] for k, v in PARAMS.items()}
-        
         ordered_params_in_table = [
             param_key for param_key in PARAMS.keys() 
             if param_key in pivot_table.index
@@ -1004,15 +1008,32 @@ else:
             pivot_table_reindexed.index = pivot_table_reindexed.index.map(display_map)
             pivot_table_reindexed = pivot_table_reindexed.rename_axis("Parametre")
 
-            # 6. Ekranda göster
+            # 7. YENİ: Sütunları (n=?) içerecek şekilde yeniden adlandır
+            if rename_map:
+                 # Sadece tabloda var olan sütunları yeniden adlandır
+                existing_cols_to_rename = {
+                    col: rename_map[col] for col in pivot_table_reindexed.columns 
+                    if col in rename_map
+                }
+                pivot_table_reindexed = pivot_table_reindexed.rename(
+                    columns=existing_cols_to_rename
+                )
+
+            # 8. Ekranda göster
             st.dataframe(pivot_table_reindexed, use_container_width=True)
             
-            # 7. İndirme butonu ekle
+            # 9. YENİ: Açıklamayı (footnote) ekle
+            st.caption("""
+                ᵃ: Normal dağılım gösteren veriler (Mean ± SD)  
+                ᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])
+            """)
+            
+            # 10. İndirme butonu (güncellenmiş tabloyu indirir)
             csv_data = pivot_table_reindexed.to_csv(index=True).encode("utf-8-sig")
             st.download_button(
                 "⬇️ Pivot Tabloyu İndir (CSV)",
                 data=csv_data,
-                file_name="varyant_pivot_ozet_akilli.csv",
+                file_name="varyant_pivot_ozet_akilli_v2.csv",
                 mime="text/csv",
             )
         else:

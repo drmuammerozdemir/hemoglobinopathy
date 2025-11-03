@@ -693,124 +693,149 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
         normalized = raw_text.map(norm_anormal_hb_text)
 
     # ============ ÖZEL AKIŞ: ANORMAL Hb/ ============
+    # ============ ÖZEL AKIŞ: ANORMAL Hb/ (GÜNCELLENMİŞ v2) ============
     if test_name == "Anormal Hb/":
-        # 1) Ham yazım → TC listesi (Frekans yerine)
-        sub_nonempty = sub[raw_text.ne("") & sub["TEST_DEGERI"].notna()].copy()
+        
+        # 1. YENİ FİLTRE: Kullanıcının istediği gibi, hem 'Anormal Hb/' hem de 'USV/' olanları getir
+        #    (ve 'Anormal Hb/'den dönüştürülmüş olabilecek diğerlerini)
+        #    Bunu, 'work' dataframe'indeki 'Anormal Hb/'den türeyen tüm varyantları bularak yapalım
+        
+        # 'norm_anormal_hb_text' fonksiyonunun döndürebileceği tüm olası metin etiketleri
+        # (Bu, 'pick_variant_tag' içindeki öncelik listesinden alınabilir)
+        known_hb_variants = {"Hb S-β-thal","HbS","HbC","HbD","HbE","USV","HbA2↑","HbF↑","Normal"}
+        
+        # 'TETKIK_ISMI'si 'Anormal Hb/' OLAN veya 'Anormal Hb/'den DÖNÜŞTÜRÜLMÜŞ olabilecek
+        # (örn. 'USV/') satırları göster.
+        # En güvenli yol, 'Anormal Hb/' testinin metin içerdiği bilinen satırları almaktır.
+        
+        # Orijinal 'sub' filtresini koruyalım ve 'sub_nonempty'yi genişletelim
+        # sub = work[work["TETKIK_ISMI"].astype(str) == test_name].copy()
+        
+        # YENİ FİLTRE: Sadece "Anormal Hb/" değil, "USV/" gibi elle düzeltilmiş olanları da göster
+        target_tests = {"Anormal Hb/", "USV/"} 
+        
+        # Eğer 'work' içinde 'ANORMAL_HB_CLEAN' varsa, oradaki değerleri de hedef listeye ekle
+        if "ANORMAL_HB_CLEAN" in work.columns:
+             target_tests.update(work["ANORMAL_HB_CLEAN"].dropna().unique())
+             
+        # 'pick_variant_tag' içinde 'USV/' gibi etiketlenen testleri de dahil et
+        # Bu çok karmaşık olacağı için şimdilik 'Anormal Hb/' ve 'USV/'ye odaklanalım:
+        
+        filter_list = {"Anormal Hb/", "USV/"}
+        sub = work[work["TETKIK_ISMI"].astype(str).isin(filter_list)].copy()
+
+        # 1) Ham yazım → TC listesi (Frekans yerine) - BU KISIM AYNI KALABİLİR
+        sub_nonempty = sub[sub["TEST_DEGERI"].notna() & (sub["TEST_DEGERI"].astype(str).str.strip() != "")].copy()
+        
         if sub_nonempty.empty:
-            st.info("Anormal Hb/ için dolu metin bulunamadı.")
+            st.info("Düzenlenecek 'Anormal Hb/' veya 'USV/' satırı bulunamadı.")
+            # Hızlı inceleme ve diğerleri için bu bloğu atla
         else:
-            # Her ham değer için benzersiz TCKIMLIK_NO listesini çıkar
-            map_tc = (
-                sub_nonempty
-                .assign(_val=raw_text.loc[sub_nonempty.index])
-                .groupby("_val", dropna=False)["TCKIMLIK_NO"]
-                .apply(lambda s: ", ".join(sorted({str(x) for x in s.dropna().astype(str)})) or "—")
-                .reset_index()
-                .rename(columns={"_val": "Ham Değer", "TCKIMLIK_NO": "TCKIMLIK_NO (liste)"})
+            # 2) Düzenlenebilir tablo (DOĞRUDAN DÜZENLEME)
+            # 'CLEAN' sütununu kaldırıyoruz
+            edit_cols = [c for c in ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TETKIK_ISMI","TEST_DEGERI"] if c in sub_nonempty.columns]
+            edit_df = sub_nonempty[edit_cols].copy()
+            
+            # YENİ: Değişiklikleri takip etmek için ana 'work' index'ini bir sütun olarak ekle
+            edit_df["__ORIG_INDEX__"] = edit_df.index
+            
+            st.markdown("**Düzenlenebilir tablo (TETKIK_ISMI ve TEST_DEGERI)**")
+            st.caption("Burada 'AnormalHb/' ismini 'USV/' olarak veya 'TEST_DEGERI'ni (örn. 'HBS D LOS ANGELES') 'USV' olarak değiştirebilirsiniz.")
+            
+            edited = st.data_editor(
+                edit_df,
+                use_container_width=True,
+                key="anormalhb_editor_v2",
+                column_config={
+                    # YENİ: Bu iki sütun artık düzenlenebilir
+                    "TETKIK_ISMI": st.column_config.TextColumn(label="TETKIK_ISMI (düzenlenebilir)"),
+                    "TEST_DEGERI": st.column_config.TextColumn(label="TEST_DEGERI (düzenlenebilir)"),
+                    
+                    # Bu sütunları kilitle
+                    "PROTOKOL_NO": st.column_config.TextColumn(disabled=True),
+                    "TCKIMLIK_NO": st.column_config.TextColumn(disabled=True),
+                    "CINSIYET": st.column_config.TextColumn(disabled=True),
+                    "SOURCE_FILE": st.column_config.TextColumn(disabled=True),
+                    
+                    # YENİ: Index sütununu gizle
+                    "__ORIG_INDEX__": None, 
+                }
             )
-            st.markdown("**Ham yazımlar (TC listeli)**")
-            st.dataframe(map_tc, use_container_width=True)
-            st.download_button(
-                "⬇️ AnormalHb_ham_yazim_TC_listesi.csv",
-                data=map_tc.to_csv(index=False).encode("utf-8-sig"),
-                file_name="AnormalHb_ham_yazim_TC_listesi.csv",
-                mime="text/csv",
-            )
-
-        # 2) Düzenlenebilir tablo (CLEAN kolonu)
-        edit_cols = [c for c in ["PROTOKOL_NO","TCKIMLIK_NO","CINSIYET","SOURCE_FILE","TEST_DEGERI"] if c in sub_nonempty.columns]
-        edit_df = sub_nonempty[edit_cols].copy()
-        clean_col = "ANORMAL_HB_CLEAN"
-        # Daha önce varsa koru; yoksa normalize öneriyi doldur
-        if clean_col in sub_nonempty.columns:
-            edit_df[clean_col] = sub_nonempty[clean_col].astype(str)
-        else:
-            edit_df[clean_col] = normalized.loc[sub_nonempty.index].fillna("").astype(str)
-
-        st.markdown("**Düzenlenebilir tablo (CLEAN değerini yazın)**")
-        edited = st.data_editor(
-            edit_df,
-            use_container_width=True,
-            key="anormalhb_editor",
-            column_config={
-                "TEST_DEGERI": st.column_config.TextColumn(label="ORIGINAL", help="Ham değer", disabled=True),
-                clean_col: st.column_config.TextColumn(label="CLEAN (düzenlenebilir)"),
-            },
-        )
-        col_apply, col_over = st.columns([1,1])
-        with col_apply:
-            apply_now = st.button("✅ Uygula ve kaydet (oturum içi)", key="apply_anormalhb")
-        with col_over:
-            overwrite_main = st.checkbox("ORIGINAL sütununu da CLEAN ile değiştir", value=False, key="over_anormalhb")
-
-        # --- DÜZELTİLMİŞ GİRİNTİ BLOKU BAŞLANGICI ---
-        if apply_now and not edited.empty:
-            # 1. Düzenlenen satırları (edited) al
-            upd = edited[[c for c in ["PROTOKOL_NO","TEST_DEGERI",clean_col] if c in edited.columns]].copy()
-            upd.rename(columns={clean_col: "__CLEAN_TMP__"}, inplace=True)
-
-            # --- DÜZELTME BÖLÜMÜ BAŞLANGICI ---
-            # Değişiklikleri hem ana 'df'ye (kalıcılık için) hem de 'work'e (bu çalıştırma için) uygulayacağız
             
-            # Anahtar oluşturucular
-            def get_keys(df_to_key):
-                key_proto = df_to_key["PROTOKOL_NO"].astype(str) if "PROTOKOL_NO" in df_to_key.columns else pd.Series("", index=df_to_key.index)
-                key_test  = df_to_key["TEST_DEGERI"].astype(str).str.strip()
-                return key_proto, key_test
-            
-            # 2. Değişiklikleri ANA 'df'ye uygula (Oturum kalıcılığı için)
-            df_key_proto, df_key_test = get_keys(df)
-            st.info(f"Ana 'df' dataframe'i {len(upd)} değişiklikle güncelleniyor...")
-            for _, r in upd.iterrows():
-                proto = str(r.get("PROTOKOL_NO",""))
-                orig  = str(r.get("TEST_DEGERI","")).strip()
-                df_mask = (df_key_proto == proto) & (df_key_test == orig)
-                
-                # 'df' dataframe'ine 'ANORMAL_HB_CLEAN' sütununu ekle (eğer yoksa)
-                if clean_col not in df.columns:
-                    df[clean_col] = pd.NA
-                
-                df.loc[df_mask, clean_col] = r["__CLEAN_TMP__"]
-                if overwrite_main:
-                    df.loc[df_mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
+            apply_now = st.button("✅ Uygula ve kaydet (oturum içi)", key="apply_anormalhb_v2")
 
-            # 3. Değişiklikleri GEÇİCİ 'work'e uygula (Bu anki pivot tablo için)
-            work_key_proto, work_key_test = get_keys(work)
-            for _, r in upd.iterrows():
-                proto = str(r.get("PROTOKOL_NO",""))
-                orig  = str(r.get("TEST_DEGERI","")).strip()
-                work_mask = (work_key_proto == proto) & (work_key_test == orig)
+            if apply_now and not edited.empty:
+                st.info("Değişiklikler uygulanıyor...")
                 
-                if clean_col not in work.columns:
-                    work[clean_col] = pd.NA
+                # 1. Değişiklikleri bulmak için 'edited' ve 'edit_df'yi karşılaştır
+                # (Daha basit yöntem: 'edited'deki her satırı 'orig_index' kullanarak 'df' ve 'work'e geri yaz)
                 
-                work.loc[work_mask, clean_col] = r["__CLEAN_TMP__"]
-                if overwrite_main:
-                    work.loc[work_mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
+                update_count = 0
+                for _, changed_row in edited.iterrows():
+                    orig_index = changed_row["__ORIG_INDEX__"]
+                    
+                    # Orijinal satırın 'df' ve 'work'te hala var olduğunu kontrol et
+                    if orig_index not in df.index or orig_index not in work.index:
+                        continue
+                        
+                    # Yeni değerleri al
+                    new_tetkik_ismi = changed_row["TETKIK_ISMI"]
+                    new_test_degeri = changed_row["TEST_DEGERI"]
+                    
+                    # Orijinal değerlerle karşılaştır (gereksiz yazmayı önle)
+                    orig_tetkik = work.loc[orig_index, "TETKIK_ISMI"]
+                    orig_test_val = work.loc[orig_index, "TEST_DEGERI"]
+                    
+                    if (orig_tetkik != new_tetkik_ismi) or (orig_test_val != new_test_degeri):
+                        update_count += 1
+                        
+                        # 2. Değişiklikleri ANA 'df'ye uygula (Kalıcılık için)
+                        df.loc[orig_index, "TETKIK_ISMI"] = new_tetkik_ismi
+                        df.loc[orig_index, "TEST_DEGERI"] = new_test_degeri
+                        
+                        # 3. Değişiklikleri GEÇİCİ 'work'e uygula (Bu anki görünüm için)
+                        work.loc[orig_index, "TETKIK_ISMI"] = new_tetkik_ismi
+                        work.loc[orig_index, "TEST_DEGERI"] = new_test_degeri
+                        
+                        # 4. YENİ: Değişen satırın sayısal değerini de güncelle
+                        #    (coerce_numeric fonksiyonu yukarıda tanımlı olmalı)
+                        new_val_num = coerce_numeric(pd.Series([new_test_degeri])).iloc[0]
+                        work.loc[orig_index, "__VAL_NUM__"] = new_val_num
+                        df.loc[orig_index, "__VAL_NUM__"] = new_val_num # Ana df'i de güncelle
 
-            # 4. 'work' üzerinde VARIANT_TAG'İ YENİDEN HESAPLA (Mevcut kodunuz)
-            st.info("CLEAN değerleri uygulandı, tüm VARIANT_TAG'ler yeniden hesaplanıyor...")
-            if "VARIANT_TAG" in work.columns:
-                work = work.drop(columns="VARIANT_TAG") # Eski tag'leri sil
-            
-            var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
-                           .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
-                           .reset_index())
-            work = work.merge(var_map, on="PROTOKOL_NO", how="left")
-            st.success("VARIANT_TAG'ler başarıyla güncellendi! Pivot tabloyu kontrol edebilirsiniz.")
-            
-            # 5. Güncellenmiş veriyi indirme
-            st.download_button(
-                "⬇️ Güncellenmiş veri (CSV)",
-                data=work.to_csv(index=False).encode("utf-8-sig"),
-                file_name="guncellenmis_veri_VE_tagler.csv",
-                mime="text/csv",
-            )
-        # --- DÜZELTME BÖLÜMÜ SONU ---
-        # --- DÜZELTİLMİŞ GİRİNTİ BLOKU SONU ---
+                st.info(f"{update_count} satır güncellendi.")
 
-        # 3) Seçince hastanın/protokolün tüm tetkikleri
-        # --- DÜZELTİLMİŞ GİRİNTİ ---
+                # 5. YENİ ve ÖNEMLİ: VARIANT_TAG'İ YENİDEN HESAPLA
+                st.info("Tüm VARIANT_TAG'ler yeniden hesaplanıyor...")
+                if "VARIANT_TAG" in work.columns:
+                    work = work.drop(columns="VARIANT_TAG") # Eski tag'leri sil
+                if "VARIANT_TAG" in df.columns:
+                    df = df.drop(columns="VARIANT_TAG") # Ana df'ten de sil
+                
+                # 'work' üzerinden tag'leri yeniden hesapla
+                var_map_work = (work.groupby("PROTOKOL_NO", group_keys=False)
+                               .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
+                               .reset_index())
+                work = work.merge(var_map_work, on="PROTOKOL_NO", how="left")
+                
+                # 'df' üzerinden tag'leri yeniden hesapla
+                var_map_df = (df.groupby("PROTOKOL_NO", group_keys=False)
+                               .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
+                               .reset_index())
+                df = df.merge(var_map_df, on="PROTOKOL_NO", how="left")
+                
+                st.success("VARIANT_TAG'ler başarıyla güncellendi! Pivot tabloyu kontrol edebilirsiniz.")
+                
+                # 6. Güncellenmiş veriyi indirme
+                st.download_button(
+                    "⬇️ Güncellenmiş veri (CSV)",
+                    data=work.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="guncellenmis_veri_v2.csv",
+                    mime="text/csv",
+                    key="download_v2"
+                )
+
+        # 3) Seçince hastanın/protokolün tüm tetkikleri (Bu kısım aynı kalır)
         st.markdown("**Hızlı inceleme: bir hasta veya protokol seçin**")
         tcs  = sorted({str(x) for x in sub_nonempty.get("TCKIMLIK_NO", pd.Series(dtype=object)).dropna().astype(str)})
         prot = sorted({str(x) for x in sub_nonempty.get("PROTOKOL_NO", pd.Series(dtype=object)).dropna().astype(str)})
@@ -842,7 +867,6 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
 
         # Bu özel akışta frekans/ki-kare göstermiyoruz.
         continue  # >>> döngünün geri kalanını Kan Grubu/ için çalıştır
-
     # ============ STANDART AKIŞ: KAN GRUBU/ (mevcut mantığınız) ============
     # 1) Ham yazımların sayımı
     sub_text = raw_text[raw_text.str.contains(r"[A-Za-zİıÖöÜüÇçŞş]", na=False)]

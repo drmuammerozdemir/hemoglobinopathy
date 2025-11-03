@@ -308,16 +308,19 @@ def norm_anormal_hb_text(x: str | None):
     if not isinstance(x, str): return None
     s = x.upper().replace("İ","I").strip()
     
-    # YENİ EKLENEN KONTROL (Genellikle USV veya benzeri metinleri yakalar)
     if re.search(r"\bUSV\b|UNIDENTIFIED|TANIMLANAMAYAN", s): return "USV"
     
-    # --- MEVCUT KOD ---
-    if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal"
+    # GÜNCELLENMİŞ BLOK
+    if re.search(r"S-?BETA ?0|S ?β0", s): return "Hb S-β0 thal"
+    if re.search(r"S-?BETA ?\+|S ?β\+", s): return "Hb S-β+ thal"
+    if re.search(r"S-?BETA|S ?β", s): return "Hb S-β-thal" # Genel
+    
     if re.search(r"\bHBS\b|S TRAIT|S HET|HBS HET|HBS TAS|S-TASIY", s): return "HbS"
+    # ... (kalanı aynı) ...
     if re.search(r"\bHBC\b", s): return "HbC"
     if re.search(r"\bHBD\b", s): return "HbD"
     if re.search(r"\bHBE\b", s): return "HbE"
-    if re.search(r"\bA2\b|HBA2", s): return "HbA2↑"
+    if re.search(r"\bA2\b|HBA2", s): return "HbA2↑ (B-thal Trait)" # Etiketi standart hale getirelim
     if re.search(r"\bF\b|HBF", s): return "HbF↑"
     if re.search(r"\bNORMAL\b|NEG", s): return "Normal"
     return None

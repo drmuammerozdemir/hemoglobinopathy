@@ -324,6 +324,7 @@ def norm_anormal_hb_text(x: str | None):
     if re.search(r"\bF\b|HBF", s): return "HbF↑"
     if re.search(r"\bNORMAL\b|NEG", s): return "Normal"
     return None
+    
 
 
 # ============== Cache'li Dosya Okuma ============== #

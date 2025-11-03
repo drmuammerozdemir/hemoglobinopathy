@@ -749,53 +749,64 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
             upd = edited[[c for c in ["PROTOKOL_NO","TEST_DEGERI",clean_col] if c in edited.columns]].copy()
             upd.rename(columns={clean_col: "__CLEAN_TMP__"}, inplace=True)
 
-            key_proto = work["PROTOKOL_NO"].astype(str) if "PROTOKOL_NO" in work.columns else pd.Series("", index=work.index)
-            key_test  = work["TEST_DEGERI"].astype(str).str.strip()
+            # --- DÜZELTME BÖLÜMÜ BAŞLANGICI ---
+            # Değişiklikleri hem ana 'df'ye (kalıcılık için) hem de 'work'e (bu çalıştırma için) uygulayacağız
             
-            # 2. 'work' dataframe'inde ilgili satırların CLEAN sütununu güncelle
+            # Anahtar oluşturucular
+            def get_keys(df_to_key):
+                key_proto = df_to_key["PROTOKOL_NO"].astype(str) if "PROTOKOL_NO" in df_to_key.columns else pd.Series("", index=df_to_key.index)
+                key_test  = df_to_key["TEST_DEGERI"].astype(str).str.strip()
+                return key_proto, key_test
+            
+            # 2. Değişiklikleri ANA 'df'ye uygula (Oturum kalıcılığı için)
+            df_key_proto, df_key_test = get_keys(df)
+            st.info(f"Ana 'df' dataframe'i {len(upd)} değişiklikle güncelleniyor...")
             for _, r in upd.iterrows():
                 proto = str(r.get("PROTOKOL_NO",""))
                 orig  = str(r.get("TEST_DEGERI","")).strip()
-                # Anahtar: Protokol NO ve Orijinal TEST_DEGERI
-                mask = (key_proto == proto) & (key_test == orig)
+                df_mask = (df_key_proto == proto) & (df_key_test == orig)
                 
-                work.loc[mask, clean_col] = r["__CLEAN_TMP__"]
+                # 'df' dataframe'ine 'ANORMAL_HB_CLEAN' sütununu ekle (eğer yoksa)
+                if clean_col not in df.columns:
+                    df[clean_col] = pd.NA
+                
+                df.loc[df_mask, clean_col] = r["__CLEAN_TMP__"]
                 if overwrite_main:
-                    # Orijinali de (isteğe bağlı) değiştir
-                    work.loc[mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
-            
-            # 3. YENİ ve ÖNEMLİ: VARIANT_TAG'İ YENİDEN HESAPLA
-            #    CLEAN sütunu güncellendiği için, tüm 'work' dataframe'i 
-            #    için 'VARIANT_TAG' sütununu SİLİP, yeni 
-            #    pick_variant_tag (Adım 1'de güncellenen) fonksiyonu ile 
-            #    baştan hesaplatıyoruz.
+                    df.loc[df_mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
+
+            # 3. Değişiklikleri GEÇİCİ 'work'e uygula (Bu anki pivot tablo için)
+            work_key_proto, work_key_test = get_keys(work)
+            for _, r in upd.iterrows():
+                proto = str(r.get("PROTOKOL_NO",""))
+                orig  = str(r.get("TEST_DEGERI","")).strip()
+                work_mask = (work_key_proto == proto) & (work_key_test == orig)
+                
+                if clean_col not in work.columns:
+                    work[clean_col] = pd.NA
+                
+                work.loc[work_mask, clean_col] = r["__CLEAN_TMP__"]
+                if overwrite_main:
+                    work.loc[work_mask, "TEST_DEGERI"] = r["__CLEAN_TMP__"]
+
+            # 4. 'work' üzerinde VARIANT_TAG'İ YENİDEN HESAPLA (Mevcut kodunuz)
             st.info("CLEAN değerleri uygulandı, tüm VARIANT_TAG'ler yeniden hesaplanıyor...")
-            
             if "VARIANT_TAG" in work.columns:
                 work = work.drop(columns="VARIANT_TAG") # Eski tag'leri sil
             
-            # Tüm 'work' üzerinden tag'leri yeniden hesapla
             var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
                            .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
                            .reset_index())
-            
-            # 'work'e yeni VARIANT_TAG sütununu ekle
             work = work.merge(var_map, on="PROTOKOL_NO", how="left")
-            
-            # USV Hesaplama bloğunun da (varsa) yeniden çalışması için
-            # 'work'ü tekrar güncelliyoruz.
-            # (Not: Bu kod, bir sonraki adımdaki 'USV (%)' hesaplamasını
-            #  tetiklemez, ancak pivot tabloyu doğru 'work' ile besler.)
-            
             st.success("VARIANT_TAG'ler başarıyla güncellendi! Pivot tabloyu kontrol edebilirsiniz.")
             
-            # 4. Güncellenmiş veriyi indirme
+            # 5. Güncellenmiş veriyi indirme
             st.download_button(
                 "⬇️ Güncellenmiş veri (CSV)",
                 data=work.to_csv(index=False).encode("utf-8-sig"),
                 file_name="guncellenmis_veri_VE_tagler.csv",
                 mime="text/csv",
             )
+        # --- DÜZELTME BÖLÜMÜ SONU ---
         # --- DÜZELTİLMİŞ GİRİNTİ BLOKU SONU ---
 
         # 3) Seçince hastanın/protokolün tüm tetkikleri

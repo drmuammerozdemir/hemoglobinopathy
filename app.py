@@ -1092,34 +1092,24 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v4 - CİNSİYET DÜZELTMESİ) ================= #
-st.header("🔬 Varyantlara Göre Parametre Özeti (Akıllı Format)")
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v6 - İKİLİ TABLO) ================= #
+st.header("🔬 Varyantlara Göre Parametre Özeti")
 st.caption("Görseldeki Table 2'ye benzer pivot tablo. Sütun başlıkları gruptaki Kadın (F) ve Erkek (M) protokol sayılarını (n) içerir.")
 
 # 1. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb.) al
 params_to_analyze = list(PARAMS.keys())
 
-# --- YENİ: Cinsiyet bazlı sütun başlıkları (n=? F/M) ---
-# (Bu, 'work' dataframe'i hemogram testlerine göre FİLTRELENMEDEN ÖNCE yapılır)
+# --- Cinsiyet bazlı sütun başlıkları (n=? F/M) ---
 rename_map = {}
 try:
-    # 1. Benzersiz protokol/varyant/cinsiyet kombinasyonlarını al
     data = work[['PROTOKOL_NO', 'VARIANT_TAG', 'CINSIYET']].dropna(subset=['PROTOKOL_NO', 'VARIANT_TAG']).drop_duplicates()
-    
-    # 2. Cinsiyeti normalize et (normalize_sex_label fonksiyonu yukarıda tanımlı olmalı)
-    # --- DÜZELTME BURADA: .astype(str) eklendi ---
     data['Gender_Clean'] = data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
-    
-    # 3. Varyant/Cinsiyet bazında grupla ve benzersiz protokolleri say
     grouped_counts = data.groupby(['VARIANT_TAG', 'Gender_Clean'])['PROTOKOL_NO'].nunique()
-    # 4. F/M sütunlarını elde etmek için pivot yap
     counts_pivot = grouped_counts.unstack(fill_value=0)
     
-    # 5. Sütun yeniden adlandırma haritasını (rename_map) oluştur
     for tag, row in counts_pivot.iterrows():
         f_count = row.get('Kadın', 0)
         m_count = row.get('Erkek', 0)
-        # Diğer (Bilinmiyor, Çakışma vb.) tüm cinsiyetleri topla
         o_count = sum(row.get(c, 0) for c in ['Bilinmiyor', 'Çakışma'] if c in row)
         
         parts = []
@@ -1134,7 +1124,7 @@ try:
 
 except KeyError:
     st.warning("Varyant sayıları (n=? F/M) hesaplanamadı. PROTOKOL_NO veya CINSIYET sütunu eksik olabilir.")
-    rename_map = {} # Harita boş kalır, yeniden adlandırma yapılmaz
+    rename_map = {}
 except Exception as e:
     st.warning(f"Cinsiyet sayımı sırasında bir hata oluştu: {e}")
     rename_map = {}
@@ -1149,90 +1139,144 @@ data_for_pivot = work[
 if data_for_pivot.empty:
     st.info("Pivot tablo için yeterli veri bulunamadı (Varyantı olan ve hemogram/HPLC parametresi içeren).")
 else:
-    # 4. AKILLI FORMATLAYICI (Değişiklik yok)
-    def _format_smart_summary_superscript(s: pd.Series):
+    
+    # --- YENİ: İKİ AYRI FORMATLAYICI TANIMLA ---
+
+    # 4a. FORMATLAYICI 1: Akıllı Format (Varsayılan)
+    def _format_smart_summary_default(s: pd.Series):
         s = pd.to_numeric(s, errors="coerce").dropna()
         n = len(s)
+        if n == 0: return "—"
+        if n == 1: return f"{s.iloc[0]:.2f}"
         
-        if n == 0:
-            return "—"
-        if n == 1:
-            return f"{s.iloc[0]:.2f}"
-            
         try:
             norm_label, _ = normality_test_with_p(s)
         except Exception:
             norm_label = "bilinmiyor"
         
-        # Yetersiz veri veya non-normal ise: Median [Min-Max] + 'b'
-        if norm_label != "normal":
+        if norm_label != "normal": # Non-normal ise Median [Min-Max]
             med = s.median()
             min_val = s.min()
             max_val = s.max()
             return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]ᵇ"
-        
-        # Normal ise: Mean ± SD + 'a'
-        else:
+        else: # Normal ise Mean ± SD
             mean = s.mean()
             std = s.std(ddof=1)
-            if pd.isna(std) or std == 0:
-                return f"{mean:.2f}"
+            if pd.isna(std) or std == 0: return f"{mean:.2f}"
             return f"{mean:.2f} ± {std:.2f}ᵃ"
 
-    try:
-        # 5. Ana Pivot tabloyu oluştur (Hemogram, HPLC, etc.)
-        pivot_table = pd.pivot_table(
-            data_for_pivot,
-            values="__VAL_NUM__",
-            index="TETKIK_ISMI",
-            columns="VARIANT_TAG",
-            aggfunc=_format_smart_summary_superscript,
-            fill_value="—"
-        )
+    # 4b. FORMATLAYICI 2: Akıllı Formatın Tersi (İnvert Edilmiş)
+    def _format_smart_summary_inverted(s: pd.Series):
+        s = pd.to_numeric(s, errors="coerce").dropna()
+        n = len(s)
+        if n == 0: return "—"
+        if n == 1: return f"{s.iloc[0]:.2f}"
+        
+        try:
+            norm_label, _ = normality_test_with_p(s)
+        except Exception:
+            norm_label = "bilinmiyor"
+        
+        # --- TERSİNE ÇEVRİLMİŞ LOGİK ---
+        if norm_label != "normal": # Non-normal ise Mean ± SD
+            mean = s.mean()
+            std = s.std(ddof=1)
+            if pd.isna(std) or std == 0: return f"{mean:.2f}"
+            return f"{mean:.2f} ± {std:.2f}"
+        else: # Normal ise Median [Min-Max]
+            med = s.median()
+            min_val = s.min()
+            max_val = s.max()
+            return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]"
 
+    # --- YENİ: Her iki tabloyu da işleyecek yardımcı fonksiyon ---
+    def _process_and_display_pivot(pivot_df, table_title, table_key, file_name_suffix):
         # 6. Satırları (index) yeniden adlandır ve sırala
         display_map = {k: v[0] for k, v in PARAMS.items()}
         ordered_params_in_table = [
             param_key for param_key in PARAMS.keys() 
-            if param_key in pivot_table.index
+            if param_key in pivot_df.index
         ]
         
-        if ordered_params_in_table:
-            # Ana pivotu PARAMS sırasına göre düzenle
-            final_pivot_table = pivot_table.loc[ordered_params_in_table]
-            # Index'i güzel isimlerle (Hb (g/dL) vb.) değiştir
-            final_pivot_table.index = final_pivot_table.index.map(display_map)
-            final_pivot_table = final_pivot_table.rename_axis("Parametre")
-            
-            # 7. Sütunları (n=? F/M) yeniden adlandır
-            if rename_map:
-                existing_cols_to_rename = {
-                    col: rename_map[col] for col in final_pivot_table.columns 
-                    if col in rename_map
-                }
-                final_pivot_table = final_pivot_table.rename(
-                    columns=existing_cols_to_rename
-                )
+        if not ordered_params_in_table:
+            st.info(f"'{table_title}' için parametre bulunamadı.")
+            return
 
-            # 8. Ekranda göster
-            st.dataframe(final_pivot_table, use_container_width=True)
-            
-            # 9. Açıklamayı (footnote) ekle
-            st.caption("""
-                ᵃ: Normal dağılım gösteren veriler (Mean ± SD)  
-                ᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])
-            """)
-            
-            # 10. İndirme butonu
-            csv_data = final_pivot_table.to_csv(index=True).encode("utf-8-sig")
-            st.download_button(
-                "⬇️ Pivot Tabloyu İndir (CSV)",
-                data=csv_data,
-                file_name="varyant_pivot_ozet_akilli_v4_cinsiyet.csv",
-                mime="text/csv",
+        final_pivot_table = pivot_df.loc[ordered_params_in_table]
+        final_pivot_table.index = final_pivot_table.index.map(display_map)
+        final_pivot_table = final_pivot_table.rename_axis("Parametre")
+        
+        # 7. Sütunları (n=? F/M) yeniden adlandır
+        if rename_map:
+            existing_cols_to_rename = {
+                col: rename_map[col] for col in final_pivot_table.columns 
+                if col in rename_map
+            }
+            final_pivot_table = final_pivot_table.rename(
+                columns=existing_cols_to_rename
             )
-        else:
-            st.info("Pivot tablo oluşturuldu ancak `PARAMS` listesiyle eşleşen parametre bulunamadı.")
+
+        # 8. Ekranda göster
+        st.subheader(table_title) # BAŞLIĞI BURAYA TAŞIDIK
+        st.dataframe(final_pivot_table, use_container_width=True, key=table_key)
+        
+        # 10. İndirme butonu
+        csv_data = final_pivot_table.to_csv(index=True).encode("utf-8-sig")
+        st.download_button(
+            f"⬇️ {table_title} İndir (CSV)",
+            data=csv_data,
+            file_name=f"varyant_pivot_ozet_{file_name_suffix}.csv",
+            mime="text/csv",
+            key=f"download_{table_key}"
+        )
+
+
+    try:
+        # --- TABLO 1: AKILLI FORMAT (VARSAYILAN) ---
+        
+        # 5a. Ana Pivot Tabloyu Oluştur
+        pivot_table_default = pd.pivot_table(
+            data_for_pivot,
+            values="__VAL_NUM__",
+            index="TETKIK_ISMI",
+            columns="VARIANT_TAG",
+            aggfunc=_format_smart_summary_default,
+            fill_value="—"
+        )
+        # Tablo 1'i işle ve göster
+        _process_and_display_pivot(
+            pivot_table_default, 
+            table_title="Tablo 1: Akıllı Format (Normal=SDᵃ, Non-Normal=Medianᵇ)",
+            table_key="akilli_format_varsayilan", 
+            file_name_suffix="akilli"
+        )
+        
+        # 9. Açıklamayı (footnote) SADECE Tablo 1'in altına ekle
+        st.caption("""
+            ᵃ: Normal dağılım gösteren veriler (Mean ± SD)  
+            ᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])
+        """)
+        
+        st.divider() # Araya ayırıcı çizgi koy
+        
+        # --- TABLO 2: İNVERT EDİLMİŞ (TERS) FORMAT ---
+
+        # 5b. İkinci Pivot Tabloyu Oluştur
+        pivot_table_inverted = pd.pivot_table(
+            data_for_pivot,
+            values="__VAL_NUM__",
+            index="TETKIK_ISMI",
+            columns="VARIANT_TAG",
+            aggfunc=_format_smart_summary_inverted,
+            fill_value="—"
+        )
+        # Tablo 2'yi işle ve göster
+        _process_and_display_pivot(
+            pivot_table_inverted, 
+            table_title="Tablo 2: İnvert Edilmiş Format (Normal=Median, Non-Normal=SD)",
+            table_key="invert_edilmis_format", 
+            file_name_suffix="inverted"
+        )
 
     except Exception as e:
         st.error(f"Pivot tablo oluşturulurken bir hata oluştu: {e}")

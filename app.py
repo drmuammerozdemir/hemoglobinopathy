@@ -216,7 +216,7 @@ def summarize_sex_counts(frame: pd.DataFrame) -> pd.DataFrame:
 def downcast_df(df: pd.DataFrame) -> pd.DataFrame:
     if "TEST_DEGERI" in df.columns:
         df["TEST_DEGERI"] = df["TEST_DEGERI"].astype(str)
-    for col in ["TETKIK_ISMI", "CINSIYET", "SOURCE_FILE"]:
+    for col in ["CINSIYET", "SOURCE_FILE"]: # "TETKIK_ISMI" buradan kaldırıldı
         if col in df.columns:
             df[col] = df[col].astype("category")
     return df

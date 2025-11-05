@@ -1287,5 +1287,57 @@ else:
 
     except Exception as e:
         st.error(f"Pivot tablo oluşturulurken bir hata oluştu: {e}")
+        
+# ================= PIVOT HAM VERİ İNDİRME ================= #
+st.subheader("🧬 Ham Veri Listesi (Pivot Tablo Grupları)")
+st.caption("Yukarıdaki pivot tabloda gördüğünüz varyant gruplarının (örn. 'HbA2↑ (B-thal Trait)', 'HPFH?') ham hasta listesini (TCKN ve tüm parametreler) indirin.")
 
+# 1. Pivot tablolar için kullandığımız ana 'work' verisini alalım
+#    Bu veri 'YAŞ' sütununu ve tüm filtreleri içerir
+#    'data_for_pivot'u kullanamayız çünkü o 'long' formatta
+#    ve sadece PARAMS'taki testleri içerir. Bize 'work' lazım.
+
+# 2. 'work' dataframe'i tüm gerekli bilgileri (TCKN, VARIANT_TAG, CINSIYET) içerir
+#    'VARIANT_TAG' sütunu olmayan satırları (örn. gruplanmamış) çıkaralım
+download_df = work[work["VARIANT_TAG"].notna()].copy()
+
+if download_df.empty:
+    st.info("İndirilecek etiketlenmiş ham veri bulunamadı.")
+else:
+    # 3. İndirme için sütunları sıralayalım (Daha okunaklı olması için)
+    cols_to_show = [
+        "VARIANT_TAG", 
+        "PROTOKOL_NO", 
+        "TCKIMLIK_NO", 
+        "CINSIYET", 
+        "YAŞ", 
+        "TETKIK_ISMI", 
+        "TEST_DEGERI", 
+        "SOURCE_FILE"
+    ]
+    # Sadece 'download_df' içinde var olan sütunları seç
+    existing_cols = [c for c in cols_to_show if c in download_df.columns]
+    
+    # Kalan diğer sütunları da sona ekle (örn. __VAL_NUM__)
+    other_cols = [c for c in download_df.columns if c not in existing_cols]
+    
+    final_download_df = download_df[existing_cols + other_cols]
+    
+    # 4. Varyant Tag'e ve Protokol No'ya göre sırala
+    final_download_df = final_download_df.sort_values(by=["VARIANT_TAG", "PROTOKOL_NO"])
+    
+    # 5. İndirme butonunu oluştur
+    csv_data_ham_veri = final_download_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "⬇️ Tüm Varyant Gruplarının Ham Listesini İndir (CSV)",
+        data=csv_data_ham_veri,
+        file_name="varyant_gruplari_ham_veri_listesi.csv",
+        mime="text/csv",
+        key="download_ham_veri_pivot"
+    )
+
+# ================= BLOK SONU ================= #
+
+# Bu satır zaten kodunuzda var, bunun üstüne yapıştırın:
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
+

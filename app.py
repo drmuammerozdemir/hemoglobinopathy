@@ -486,27 +486,22 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
     
     # --- KURAL 0: MANUEL DÜZELTME (En Yüksek Öncelik) ---
-    # Kullanıcı "Düzenlenebilir tablo"ya "USV" gibi bir değer yazdıysa,
-    # bu, diğer tüm kuralları ezer.
     clean_col = "ANORMAL_HB_CLEAN"
     if clean_col in g.columns:
         clean_values = g[clean_col].dropna().astype(str)
         clean_values = clean_values[clean_values != ""]
         if not clean_values.empty:
-            return clean_values.iloc[0] # Manuel etiketi (örn. "USV") döndür
+            return clean_values.iloc[0] 
 
-    # --- KURAL 1: KOMPLEKS/KANTİTATİF TANI (Yeni Akıllı Kurallar) ---
+    # --- KURAL 1: KOMPLEKS/KANTİTATİF TANI ---
     
-    # Bu protokoldeki tüm kilit değerleri almak için bir yardımcı fonksiyon
     def get_val(df, keys):
         if isinstance(keys, str): keys = {keys}
-        # PARAMS'taki alternatif isimleri (örn. A2/ ve HbA2 (%)) bul
         all_keys = set(keys)
         for k in keys:
-            if k in PARAMS:
-                # PARAMS'taki ('HbA₂ (%)', '2-3.5') gibi girdiden 'HbA₂ (%)' adını al
+            # PARAMS sözlüğü artık global scope'ta (en başta) olmalı
+            if k in PARAMS: 
                 display_name = PARAMS[k][0]
-                # Aynı görünen isme sahip diğer tüm anahtarları ekle
                 all_keys.update({p_key for p_key, (disp, ref) in PARAMS.items() if disp == display_name})
                 
         s = df.loc[df["TETKIK_ISMI"].isin(all_keys), "__VAL_NUM__"].dropna()
@@ -514,76 +509,89 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
 
     # Gerekli tüm HPLC ve Hemogram değerlerini al
     mcv = get_val(g, {"Hemogram/MCV"})
-    a2 = get_val(g, {"A2/"}) # PARAMS'taki tüm A2 alternatiflerini bulur
-    f = get_val(g, {"F/"})   # PARAMS'taki tüm F alternatiflerini bulur
-    s = get_val(g, {"S/"})   # PARAMS'taki tüm S alternatiflerini bulur
-    a = get_val(g, {"HbA"})  # PARAMS'taki tüm A/A0 alternatiflerini bulur
-
+    mch = get_val(g, {"Hemogram/MCH"}) # YENİ EKLENDİ
+    a2 = get_val(g, {"A2/"}) 
+    f = get_val(g, {"F/"})   
+    s = get_val(g, {"S/"})   
+    a = get_val(g, {"HbA"})  
+    c = get_val(g, {"C/"})   
+    
     # Kurallar için değerleri güvenli hale getir
-    is_microcytic = (mcv < 80) if pd.notna(mcv) else False # Mikrositoz var mı?
+    
+    # --- GÜNCELLENMİŞ KURAL (MCV veya MCH) ---
+    mcv_val = mcv if pd.notna(mcv) else 999.0 # (default to non-microcytic)
+    mch_val = mch if pd.notna(mch) else 999.0 # (default to non-hypochromic)
+    
+    # Kural: MCV < 80 VEYA MCH < 27
+    has_micro_hypo = (mcv_val < 80) or (mch_val < 27)
+    # --- GÜNCELLEME SONU ---
+    
     hba2_val = a2 if pd.notna(a2) else 0.0
     hbf_val = f if pd.notna(f) else 0.0
     hbs_val = s if pd.notna(s) else 0.0
-    # HbA'nın varlığını kontrol et (örn. S/B+ için > 1.0)
+    hbc_val = c if pd.notna(c) else 0.0 
     hba_present = (a > 1.0) if pd.notna(a) else False 
     
-    tags = [] # Olası tanılar için bir etiket listesi
+    tags = [] 
 
     # --- Kural 1a: Hb S-beta-thal (S/B+ veya S/B0) ---
-    # Kriter: Mikrositoz + Yüksek A2 + Dominant S
-    if is_microcytic and hba2_val > 3.5 and hbs_val > 50:
+    # GÜNCELLENDİ: 'is_microcytic' yerine 'has_micro_hypo' kullanılıyor
+    if has_micro_hypo and hba2_val > 3.5 and hbs_val > 50:
         if hba_present:
             tags.append("Hb S-β+ thal")
         else:
             tags.append("Hb S-β0 thal")
     
     # --- Kural 1b: delta-beta-thal Taşıyıcılığı ---
-    # Kriter: Mikrositoz + Normal/Düşük A2 + Yüksek F (5-20%)
-    if is_microcytic and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
+    # GÜNCELLENDİ: 'is_microcytic' yerine 'has_micro_hypo' kullanılıyor
+    if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")
+        
+    # --- Kural 1c: Hb S/C veya S/O-Arab Hastalığı ---
+    if (hbs_val > 0) and (hbc_val > 0) and (not hba_present):
+        tags.append("Hb S/C or S/O-Arab?") 
 
-    # --- KURAL 2: METİN BAZLI TANI (Eski Mantık) ---
-    # (Metin yorumuyla yakalananlar, örn. "USV")
+    # --- KURAL 2: METİN BAZLI TANI ---
     txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
     for v in txt:
-        t = norm_anormal_hb_text(v) # Bu fonksiyon "USV", "HbS", "HbC" vb. döndürür
+        t = norm_anormal_hb_text(v) 
         if t: tags.append(t)
         
-    # --- KURAL 3: BASİT KANTİTATİF TANI (Eski Mantık) ---
+    # --- KURAL 3: BASİT KANTİTATİF TANI ---
     
-    # 3a) Basit A2 Yüksekliği (Beta-talasemi taşıyıcılığı)
     if hba2_val > 3.5:
         tags.append("HbA2↑ (B-thal Trait)")
         
-    # 3b) Basit F Yüksekliği (HPFH?)
     if hbf_val > 2.0: 
-        # db-thal'den ayırmak için: Eğer mikrositik DEĞİLSE ve F yüksekse HPFH olabilir
-        if not is_microcytic and hbf_val > 5:
-            tags.append("HPFH?") # Hereditary Persistence of Fetal Hb
+        # GÜNCELLENDİ: 'is_microcytic' yerine 'has_micro_hypo' kullanılıyor
+        if not has_micro_hypo and hbf_val > 5:
+            tags.append("HPFH?")
         else:
-            tags.append("HbF↑") # Genel HbF yüksekliği
+            tags.append("HbF↑") 
             
-    # 3c) Diğer Varyantlar (S, C, D, E)
-    # (NUMVAR_FROM_TEST = {"C/":"HbC", "D/":"HbD", "E/":"HbE", "S/":"HbS"})
+    # Diğer Varyantlar (S, C, D, E)
     for k, var_name in NUMVAR_FROM_TEST.items():
-        val = get_val(g, {k}) # İlgili piki (örn. C/) al
-        if pd.notna(val) and val > 0.1: # Eğer pik varsa (0'dan büyükse)
-            # Eğer sadece taşıyıcılık düzeyindeyse (örn. S < 50%)
+        val = get_val(g, {k}) 
+        if pd.notna(val) and val > 0.1:
+            
+            if (var_name == "HbS" or var_name == "HbC") and ("Hb S/C or S/O-Arab?" in tags):
+                continue 
+
             if var_name == "HbS" and val < 50:
                 tags.append("HbS Trait")
             else:
-                tags.append(var_name) # HbS, HbC, HbD, HbE
+                tags.append(var_name)
     
     if not tags: return None
     
-    # --- FİNAL ÖNCELİK LİSTESİ ---
-    # En spesifik tanıların (S/B-thal) en başta olmasını sağla
+    # --- FİNAL ÖNCELİK LİSTESİ (Aynı) ---
     for p in [
         # 1. En spesifik kompleks tanılar
         "Hb S-β0 thal", 
         "Hb S-β+ thal", 
+        "Hb S/C or S/O-Arab?", 
         "δβ-thal Trait",
-        # 2. Metin bazlı "Hb S-β-thal" (eğer yakalanırsa)
+        # 2. Metin bazlı "Hb S-β-thal"
         "Hb S-β-thal",
         # 3. Diğer önemli varyantlar
         "HbS", 
@@ -600,9 +608,9 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "Normal"
     ]:
         if p in tags: 
-            return p # Bulunan ilk en yüksek öncelikli etiketi döndür
+            return p
             
-    return tags[0] # Listede yoksa bulunan ilk etiketi döndür
+    return tags[0] Listede yoksa bulunan ilk etiketi döndür
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
                    .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))

@@ -754,8 +754,8 @@ if variant_choice != "(Tümü)":
     st.download_button("⬇️ Birleşik tablo (CSV)",
                         data=combined_df.to_csv(index=False).encode("utf-8-sig"),
                         file_name=f"birlesik_{variant_choice}.csv",
-                        mime="text/csv")
-
+                        mime="text/csv"
+)
 
 # ================= Kategorik Veri Analizi — Benzersiz Değerler ================= #
 st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")

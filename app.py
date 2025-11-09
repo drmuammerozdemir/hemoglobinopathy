@@ -610,7 +610,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         if p in tags: 
             return p
             
-    return tags[0] Listede yoksa bulunan ilk etiketi döndür
+    return tags[0] # Listede yoksa bulunan ilk etiketi döndür
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
                    .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))

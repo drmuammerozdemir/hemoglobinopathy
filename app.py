@@ -623,45 +623,115 @@ present = [t for t in ["Hb S-β-thal","HbS","HbC","HbD","HbE","HbA2↑","HbF↑"
 variant_choice = st.selectbox("Varyant seç:", ["(Tümü)"] + present, index=0)
 
 base_v = work.copy()
-if variant_choice != "(Tümü)":
-    base_v = base_v[base_v["VARIANT_TAG"] == variant_choice]
+# 2) Seçilen varyant için ♀/♂ Mean ± SD tablosu
+    
+    # YENİ: _mean_sd fonksiyonunu (Mean±SD formatlar) buraya geri ekle
+    def _mean_sd(s: pd.Series):
+        s = pd.to_numeric(s, errors="coerce").dropna()
+        if s.empty:
+            return "—"
+        
+        mean = s.mean()
+        std = s.std(ddof=1) # ddof=1: sample standard deviation
+        
+        # Eğer tek bir değer varsa (std hesaplanamaz, NaN olur)
+        if pd.isna(std) or std == 0:
+            return f"{mean:.2f}"
+        
+        return f"{mean:.2f} ± {std:.2f}"
 
-# 1) Tümü için frekans
-if variant_choice == "(Tümü)":
-    freq = (work["VARIANT_TAG"].value_counts(dropna=True)
-            .rename_axis("Varyant").to_frame("N").reset_index())
-    total = int(freq["N"].sum()) if not freq.empty else 0
-    if total > 0: freq["%"] = (freq["N"]/total*100).round(2)
-    st.subheader("Varyant Frekansları")
-    st.dataframe(freq, use_container_width=True)
-    st.download_button("⬇️ Varyant frekansları (CSV)",
-                      data=freq.to_csv(index=False).encode("utf-8-sig"),
-                      file_name="varyant_frekans.csv", mime="text/csv")
+    table_fm = pd.DataFrame()
+    if variant_choice != "(Tümü)":
+        rows = []
+        
+        # YENİ: ADIM 1 - YAŞ'ı özel olarak işle
+        # (base_v = seçilen varyanta (örn. HbA2↑) göre filtrelenmiş ana veri)
+        if "YAS" in base_v.columns:
+            # Protokol başına benzersiz yaş al
+            age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
+            age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce')
+            
+            # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
+            age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+            
+            fem_age = age_data.loc[age_data['Gender_Clean'] == 'Kadın', "YAS"]
+            male_age = age_data.loc[age_data['Gender_Clean'] == 'Erkek', "YAS"]
+            
+            # Formatla
+            fem_age_str = _mean_sd(fem_age)
+            male_age_str = _mean_sd(male_age)
+            
+            # PARAMS'tan referans aralığını al (eğer varsa)
+            ref_range = PARAMS.get("YAS", ("Yaş (yıl)", "—"))[1] 
+            
+            rows.append({"Parameter": "Yaş (yıl)", "Female (Mean ± SD)": fem_age_str, "Male (Mean ± SD)": male_age_str, "Reference range": ref_range})
 
+        # ADIM 2 - Kalan PARAMS'ları (Hemogram, HPLC) işle
+        # (PARAMS sözlüğü kodun en başında global olarak tanımlı)
+        for tetkik_key, (disp, ref) in PARAMS.items():
+            
+            # YENİ: YAŞ'ı tekrar işleme (zaten yapıldı)
+            if tetkik_key == "YAS":
+                continue 
+                
+            subp = base_v[base_v["TETKIK_ISMI"] == tetkik_key].copy()
+            if subp.empty: 
+                continue
+                
+            subp = add_numeric_copy(subp)  # __VAL_NUM__ güvence
+            
+            # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
+            subp['Gender_Clean'] = subp['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+            
+            fem = _mean_sd(subp.loc[subp['Gender_Clean'] == 'Kadın', "__VAL_NUM__"])
+            male = _mean_sd(subp.loc[subp['Gender_Clean'] == 'Erkek', "__VAL_NUM__"])
+            
+            rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
+        
+        table_fm = pd.DataFrame(rows)
+        st.subheader("♀/♂ Mean ± SD (seçilen varyant)")
+        if table_fm.empty:
+            st.info("Bu varyant için parametrik veri bulunamadı.")
+        else:
+            st.dataframe(table_fm, use_container_width=True)
+            st.download_button("⬇️ Tablo #1 (CSV)",
+                                data=table_fm.to_csv(index=False).encode("utf-8-sig"),
+                                file_name=f"varyant_ozet_{variant_choice}.csv", mime="text/csv")
 
-
-
-
-table_fm = pd.DataFrame()
-if variant_choice != "(Tümü)":
-    rows = []
-    for tetkik_key, (disp, ref) in PARAMS.items():
-        subp = base_v[base_v["TETKIK_ISMI"] == tetkik_key].copy()
-        if subp.empty: 
-            continue
-        subp = add_numeric_copy(subp)  # __VAL_NUM__ güvence
-        fem = _mean_sd(subp.loc[subp["CINSIYET"].astype(str).str.lower().str.startswith(("k","f")), "__VAL_NUM__"])
-        male= _mean_sd(subp.loc[subp["CINSIYET"].astype(str).str.lower().str.startswith(("e","m")), "__VAL_NUM__"])
-        rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
-    table_fm = pd.DataFrame(rows)
-    st.subheader("♀/♂ Mean ± SD (seçilen varyant)")
-    if table_fm.empty:
-        st.info("Bu varyant için parametrik veri bulunamadı.")
-    else:
-        st.dataframe(table_fm, use_container_width=True)
-        st.download_button("⬇️ Tablo #1 (CSV)",
-                            data=table_fm.to_csv(index=False).encode("utf-8-sig"),
-                            file_name="varyant_ozet_female_male.csv", mime="text/csv")
+    # 3) Birleşik tablo (Varyant Frekansları + Mean±SD)
+    # (Bu blok silinmişti, YAŞ ile uyumlu çalışması için güncellendi)
+    if variant_choice != "(Tümü)":
+        # 'freq' tablosu 'if variant_choice == "(Tümü)"' bloğunda tanımlı DEĞİL,
+        # bu yüzden 'work'ten yeniden hesaplamalıyız.
+        freq_v = (work["VARIANT_TAG"].value_counts(dropna=True)
+                  .rename_axis("Varyant").to_frame("N").reset_index())
+        total_v = int(freq_v["N"].sum()) if not freq_v.empty else 0
+        if total_v > 0: freq_v["%"] = (freq_v["N"]/total_v*100).round(2)
+        
+        freq_part = freq_v[freq_v["Varyant"] == variant_choice].copy()
+        if not freq_part.empty:
+            freq_part = freq_part.rename(columns={"Varyant":"Başlık"})
+            freq_part.insert(0,"Bölüm",f"Varyant Frekans ({variant_choice})")
+            
+        msd_part = table_fm.copy()
+        if not msd_part.empty:
+            msd_part = msd_part.rename(columns={"Parameter":"Başlık"})
+            msd_part.insert(0,"Bölüm","♀/♂ Mean ± SD")
+            
+        cols = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
+        for dfc in (freq_part, msd_part):
+            for c in cols:
+                if c not in dfc.columns: dfc[c] = pd.NA # None yerine NA
+                
+        combined_df = pd.concat([freq_part, msd_part], ignore_index=True)
+        # Sütunları yeniden sırala (N,% başa gelsin)
+        cols_order = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
+        combined_df = combined_df[[c for c in cols_order if c in combined_df.columns]]
+        
+        st.subheader("🧩 Birleşik Tablo (Seçilen Varyant)")
+        st.dataframe(combined_df, use_container_width=True)
+        st.download_button("⬇️ Birleşik tablo (CSV)",
+                            data=combined_df.to_csv(index=False).encode("utf-8-sig"),
 
 # 3) Birleşik tablo (Varyant Frekansları + Mean±SD)
 if variant_choice != "(Tümü)":

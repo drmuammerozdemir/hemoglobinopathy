@@ -626,7 +626,8 @@ base_v = work.copy()
 # 2) Seçilen varyant için ♀/♂ Mean ± SD tablosu
     
     # YENİ: _mean_sd fonksiyonunu (Mean±SD formatlar) buraya geri ekle
-    def _mean_sd(s: pd.Series):
+
+def _mean_sd(s: pd.Series):
         s = pd.to_numeric(s, errors="coerce").dropna()
         if s.empty:
             return "—"

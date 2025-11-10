@@ -623,10 +623,27 @@ present = [t for t in ["Hb S-β-thal","HbS","HbC","HbD","HbE","HbA2↑","HbF↑"
 variant_choice = st.selectbox("Varyant seç:", ["(Tümü)"] + present, index=0)
 
 base_v = work.copy()
+if variant_choice != "(Tümü)":
+    base_v = base_v[base_v["VARIANT_TAG"] == variant_choice]
+
+# 1) Tümü için frekans
+if variant_choice == "(Tümü)":
+    freq = (work["VARIANT_TAG"].value_counts(dropna=True)
+            .rename_axis("Varyant").to_frame("N").reset_index())
+    total = int(freq["N"].sum()) if not freq.empty else 0
+    if total > 0: freq["%"] = (freq["N"]/total*100).round(2)
+    st.subheader("Varyant Frekansları")
+    st.dataframe(freq, use_container_width=True)
+    st.download_button("⬇️ Varyant frekansları (CSV)",
+                      data=freq.to_csv(index=False).encode("utf-8-sig"),
+                      file_name="varyant_frekans.csv", mime="text/csv")
+
+
+# --- DÜZELTİLMİŞ BLOK BAŞLANGICI ---
+
 # 2) Seçilen varyant için ♀/♂ Mean ± SD tablosu
     
-    # YENİ: _mean_sd fonksiyonunu (Mean±SD formatlar) buraya geri ekle
-
+# YENİ: _mean_sd fonksiyonunu (Mean±SD formatlar) buraya geri ekle
 def _mean_sd(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce").dropna()
     if s.empty:
@@ -699,63 +716,45 @@ if variant_choice != "(Tümü)":
                             data=table_fm.to_csv(index=False).encode("utf-8-sig"),
                             file_name=f"varyant_ozet_{variant_choice}.csv", mime="text/csv")
 
-    # 3) Birleşik tablo (Varyant Frekansları + Mean±SD)
-    # (Bu blok silinmişti, YAŞ ile uyumlu çalışması için güncellendi)
-    if variant_choice != "(Tümü)":
-        # 'freq' tablosu 'if variant_choice == "(Tümü)"' bloğunda tanımlı DEĞİL,
-        # bu yüzden 'work'ten yeniden hesaplamalıyız.
-        freq_v = (work["VARIANT_TAG"].value_counts(dropna=True)
-                  .rename_axis("Varyant").to_frame("N").reset_index())
-        total_v = int(freq_v["N"].sum()) if not freq_v.empty else 0
-        if total_v > 0: freq_v["%"] = (freq_v["N"]/total_v*100).round(2)
-        
-        freq_part = freq_v[freq_v["Varyant"] == variant_choice].copy()
-        if not freq_part.empty:
-            freq_part = freq_part.rename(columns={"Varyant":"Başlık"})
-            freq_part.insert(0,"Bölüm",f"Varyant Frekans ({variant_choice})")
-            
-        msd_part = table_fm.copy()
-        if not msd_part.empty:
-            msd_part = msd_part.rename(columns={"Parameter":"Başlık"})
-            msd_part.insert(0,"Bölüm","♀/♂ Mean ± SD")
-            
-        cols = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
-        for dfc in (freq_part, msd_part):
-            for c in cols:
-                if c not in dfc.columns: dfc[c] = pd.NA # None yerine NA
-                
-        combined_df = pd.concat([freq_part, msd_part], ignore_index=True)
-        # Sütunları yeniden sırala (N,% başa gelsin)
-        cols_order = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
-        combined_df = combined_df[[c for c in cols_order if c in combined_df.columns]]
-        
-        st.subheader("🧩 Birleşik Tablo (Seçilen Varyant)")
-        st.dataframe(combined_df, use_container_width=True)
-        st.download_button("⬇️ Birleşik tablo (CSV)",
-                            data=combined_df.to_csv(index=False).encode("utf-8-sig"),
-
 # 3) Birleşik tablo (Varyant Frekansları + Mean±SD)
+# (Bu blok silinmişti, YAŞ ile uyumlu çalışması için güncellendi)
 if variant_choice != "(Tümü)":
-    freq_part = locals().get("freq", pd.DataFrame(columns=["Varyant","N","%"])).copy()
+    # 'freq' tablosu 'if variant_choice == "(Tümü)"' bloğunda tanımlı DEĞİL,
+    # bu yüzden 'work'ten yeniden hesaplamalıyız.
+    freq_v = (work["VARIANT_TAG"].value_counts(dropna=True)
+                .rename_axis("Varyant").to_frame("N").reset_index())
+    total_v = int(freq_v["N"].sum()) if not freq_v.empty else 0
+    if total_v > 0: freq_v["%"] = (freq_v["N"]/total_v*100).round(2)
+    
+    freq_part = freq_v[freq_v["Varyant"] == variant_choice].copy()
     if not freq_part.empty:
         freq_part = freq_part.rename(columns={"Varyant":"Başlık"})
-        freq_part.insert(0,"Bölüm","Varyant Frekansları")
+        freq_part.insert(0,"Bölüm",f"Varyant Frekans ({variant_choice})")
+        
     msd_part = table_fm.copy()
     if not msd_part.empty:
         msd_part = msd_part.rename(columns={"Parameter":"Başlık"})
         msd_part.insert(0,"Bölüm","♀/♂ Mean ± SD")
+        
     cols = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
     for dfc in (freq_part, msd_part):
         for c in cols:
-            if c not in dfc.columns: dfc[c] = None
-    combined_df = pd.concat([freq_part[cols], msd_part[cols]], ignore_index=True)
-    st.subheader("🧩 Birleşik Tablo")
+            if c not in dfc.columns: dfc[c] = pd.NA # None yerine NA
+            
+    combined_df = pd.concat([freq_part, msd_part], ignore_index=True)
+    # Sütunları yeniden sırala (N,% başa gelsin)
+    cols_order = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
+    combined_df = combined_df[[c for c in cols_order if c in combined_df.columns]]
+    
+    st.subheader("🧩 Birleşik Tablo (Seçilen Varyant)")
     st.dataframe(combined_df, use_container_width=True)
     st.download_button("⬇️ Birleşik tablo (CSV)",
                         data=combined_df.to_csv(index=False).encode("utf-8-sig"),
                         file_name=f"birlesik_{variant_choice}.csv",
                         mime="text/csv"
-)
+    )
+# --- DÜZELTİLMİŞ BLOK SONU ---
+
 
 # ================= Kategorik Veri Analizi — Benzersiz Değerler ================= #
 st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")
@@ -773,7 +772,6 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
     else:
         normalized = raw_text.map(norm_anormal_hb_text)
 
-    # ============ ÖZEL AKIŞ: ANORMAL Hb/ ============
     # ============ ÖZEL AKIŞ: ANORMAL Hb/ (GÜNCELLENMİŞ v2) ============
     if test_name == "Anormal Hb/":
         
@@ -1389,7 +1387,7 @@ else:
         "PROTOKOL_NO", 
         "TCKIMLIK_NO", 
         "CINSIYET", 
-        "YAŞ", 
+        "YAS", 
         "TETKIK_ISMI", 
         "TEST_DEGERI", 
         "SOURCE_FILE"
@@ -1419,4 +1417,3 @@ else:
 
 # Bu satır zaten kodunuzda var, bunun üstüne yapıştırın:
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
-

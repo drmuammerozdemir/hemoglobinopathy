@@ -606,9 +606,12 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             else:
                 tags.append(var_name)
     
-    if not tags: return None
+    # --- GÜNCELLEME: "SAĞLIKLI" (Normal) GRUBU ---
+    if not tags: 
+        # tags listesi boşsa, 'Normal (Assumed)' olarak etiketle
+        return "Normal (Assumed)" 
     
-    # --- FİNAL ÖNCELİK LİSTESİ (Aynı) ---
+    # --- FİNAL ÖNCELİK LİSTESİ (GÜNCELLENDİ) ---
     for p in [
         # 1. En spesifik kompleks tanılar
         "Hb S-β0 thal", 
@@ -629,7 +632,8 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "HPFH?",
         "HbF↑",
         # 5. Normal
-        "Normal"
+        "Normal (Assumed)", # YENİ EKLENDİ
+        "Normal" # Metinden okunan "Normal"
     ]:
         if p in tags: 
             return p
@@ -775,11 +779,13 @@ if variant_choice != "(Tümü)":
     
     st.subheader("🧩 Birleşik Tablo (Seçilen Varyant)")
     st.dataframe(combined_df, use_container_width=True)
+    
+    # --- DÜZELTİLMİŞ SATIR (734) ---
     st.download_button("⬇️ Birleşik tablo (CSV)",
                         data=combined_df.to_csv(index=False).encode("utf-8-sig"),
                         file_name=f"birlesik_{variant_choice}.csv",
                         mime="text/csv"
-    )
+    ) # <-- EKSİK PARANTEZ BURAYA EKLENDİ
 # --- DÜZELTİLMİŞ BLOK SONU ---
 
 

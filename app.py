@@ -444,26 +444,50 @@ with right:
     files = [str(x) for x in df["SOURCE_FILE"].dropna().unique()]
     chosen_files = st.multiselect("Dosya filtresi", options=files, default=files)
 
-# --- 99 ile başlayan TCKN filtreleme kontrolü ---
-st.markdown("### 🧾 TCKN Filtre Seçimi")
+# --- GÜNCELLENMİŞ TCKN FİLTRE BLOKU (SATIR 432-467) ---
+st.markdown("### 🧾 TCKN Filtre Seçimi (Gelişmiş)")
 
 tckn_filter = st.selectbox(
     "TCKN filtrele:",
-    ["Hepsi", "Sadece gerçek TCKN", "Sadece 99'lu TCKN"],
+    [
+        "Hepsi", 
+        "Sadece Gerçek TCKN (11 hane, 99'la başlamayan)", 
+        "Sadece Yabancı/Geçici (99'lu veya 11 hane olmayan)"
+    ],
     index=1,  # Varsayılan: Sadece gerçek TCKN
-    help="99 ile başlayanlar genelde geçici kayıtlardır."
+    help="Gerçek TCKN: 11 haneli ve 99 ile başlamayan. Yabancı/Geçici: 99 ile başlayan VEYA 11 hane olmayan (Dosya No vb.)."
 )
 
 work = df.copy()
 # --- TCKN filtreleme ---
 if "TCKIMLIK_NO" in work.columns:
-    tckn_str = work["TCKIMLIK_NO"].astype(str)
+    # Önce str yap, NaN'ları boş string yap, boşlukları temizle
+    tckn_str = work["TCKIMLIK_NO"].astype(str).fillna("").str.strip()
+    
+    # Kural 1: 11 hane mi?
+    is_11_digits = tckn_str.str.len() == 11
+    
+    # Kural 2: 99 ile mi başlıyor?
+    starts_with_99 = tckn_str.str.startswith("99")
+    
+    # Kural 3: "Gerçek TCKN" maskesi
+    # 11 haneli OLMALI VE 99 ile BAŞLAMAMALI
+    is_gercek_mask = is_11_digits & (~starts_with_99)
+    
+    # Kural 4: "Yabancı/Geçici" maskesi
+    # 99 ile BAŞLAMALI VEYA 11 hane OLMAMALI
+    # (Ayrıca boş olmayanları alalım ki NaN'lar bu gruba girmesin)
+    is_yabanci_mask = (starts_with_99 | (~is_11_digits)) & (tckn_str != "")
 
-    if tckn_filter == "Sadece gerçek TCKN":
-        work = work[~tckn_str.str.startswith("99", na=False)]
+    if tckn_filter == "Sadece Gerçek TCKN (11 hane, 99'la başlamayan)":
+        work = work[is_gercek_mask]
 
-    elif tckn_filter == "Sadece 99'lu TCKN":
-        work = work[tckn_str.str.startswith("99", na=False)]
+    elif tckn_filter == "Sadece Yabancı/Geçici (99'lu veya 11 hane olmayan)":
+        work = work[is_yabanci_mask]
+    
+    # 'Hepsi' seçeneği için hiçbir şey yapma (work = df.copy() zaten çalıştı)
+# --- GÜNCELLENMİŞ BLOK SONU ---
+
 
 if chosen_sex:
     work = work[work["CINSIYET"].astype(str).isin(chosen_sex)]
@@ -1223,6 +1247,10 @@ if "YAS" in work.columns:
     
     # 3. Sayısal olduğundan emin ol (coerce_numeric yukarıda tanımlı olmalı)
     age_data['__VAL_NUM__'] = coerce_numeric(age_data['__VAL_NUM__'])
+    
+    # YENİ EKLENEN FİLTRE: 1 olarak girilen yaşları 'Yok' say (NaN yap)
+    age_data['__VAL_NUM__'] = age_data['__VAL_NUM__'].replace(1, np.nan)
+    
     age_data = age_data.dropna(subset=['__VAL_NUM__'])
     
     age_data_to_add = age_data
@@ -1373,7 +1401,7 @@ st.subheader("🧬 Ham Veri Listesi (Pivot Tablo Grupları)")
 st.caption("Yukarıdaki pivot tabloda gördüğünüz varyant gruplarının (örn. 'HbA2↑ (B-thal Trait)', 'HPFH?') ham hasta listesini (TCKN ve tüm parametreler) indirin.")
 
 # 1. Pivot tablolar için kullandığımız ana 'work' verisini alalım
-#    Bu veri 'YAŞ' sütununu ve tüm filtreleri içerir
+#    Bu veri 'YAS' sütununu ve tüm filtreleri içerir
 #    'data_for_pivot'u kullanamayız çünkü o 'long' formatta
 #    ve sadece PARAMS'taki testleri içerir. Bize 'work' lazım.
 
@@ -1390,7 +1418,7 @@ else:
         "PROTOKOL_NO", 
         "TCKIMLIK_NO", 
         "CINSIYET", 
-        "YAS", 
+        "YAS", # 'YAŞ' -> 'YAS' olarak düzeltildi
         "TETKIK_ISMI", 
         "TEST_DEGERI", 
         "SOURCE_FILE"
@@ -1418,5 +1446,4 @@ else:
 
 # ================= BLOK SONU ================= #
 
-# Bu satır zaten kodunuzda var, bunun üstüne yapıştırın:
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

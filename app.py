@@ -444,7 +444,7 @@ with right:
     files = [str(x) for x in df["SOURCE_FILE"].dropna().unique()]
     chosen_files = st.multiselect("Dosya filtresi", options=files, default=files)
 
-# --- GÜNCELLENMİŞ TCKN FİLTRE BLOKU (SATIR 432-467) ---
+# --- TCKN FİLTRESİ ---
 st.markdown("### 🧾 TCKN Filtre Seçimi (Gelişmiş)")
 
 tckn_filter = st.selectbox(
@@ -458,7 +458,25 @@ tckn_filter = st.selectbox(
     help="Gerçek TCKN: 11 haneli ve 99 ile başlamayan. Yabancı/Geçici: 99 ile başlayan VEYA 11 hane olmayan (Dosya No vb.)."
 )
 
+# --- YENİ YAŞ FİLTRESİ ---
+st.markdown("### 🎂 Yaş Filtre Seçimi")
+age_filter = st.selectbox(
+    "Yaş filtresi:",
+    ["Tümü", "Sadece 18 yaş ve üstü", "Sadece 18 yaş altı"],
+    index=0,  # Varsayılan: Tümü
+    help="18 yaş altı (<18), 18 yaş ve üstü (>=18). Evlilik taraması için 18 yaş üstü önerilir."
+)
+
 work = df.copy()
+
+# --- YAS SÜTUNUNU FİLTRELEME İÇİN SAYISALA DÖNÜŞTÜR (VE 1'LERİ TEMİZLE) ---
+if "YAS" in work.columns:
+    # 1'leri (placeholder) NaN yap, sonra sayıya çevir
+    work["YAS"] = pd.to_numeric(work["YAS"], errors='coerce').replace(1, np.nan)
+else:
+    # YAS sütunu yoksa, filtrelemenin hata vermemesi için boş bir NaN sütun oluştur
+    work["YAS"] = np.nan 
+
 # --- TCKN filtreleme ---
 if "TCKIMLIK_NO" in work.columns:
     # Önce str yap, NaN'ları boş string yap, boşlukları temizle
@@ -485,8 +503,16 @@ if "TCKIMLIK_NO" in work.columns:
     elif tckn_filter == "Sadece Yabancı/Geçici (99'lu veya 11 hane olmayan)":
         work = work[is_yabanci_mask]
     
-    # 'Hepsi' seçeneği için hiçbir şey yapma (work = df.copy() zaten çalıştı)
-# --- GÜNCELLENMİŞ BLOK SONU ---
+    # 'Hepsi' seçeneği için hiçbir şey yapma
+
+# --- Yaş filtreleme ---
+if age_filter == "Sadece 18 yaş ve üstü":
+    # YAS >= 18 olanları al (NaN olmayanları da otomatik alır)
+    work = work[work["YAS"] >= 18]
+elif age_filter == "Sadece 18 yaş altı":
+    # YAS < 18 olanları al (NaN olmayanları da otomatik alır)
+    work = work[work["YAS"] < 18]
+# 'Tümü' seçiliyse bir şey yapma
 
 
 if chosen_sex:
@@ -695,10 +721,7 @@ if variant_choice != "(Tümü)":
     if "YAS" in base_v.columns:
         # Protokol başına benzersiz yaş al
         age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
-        age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce')
-            
-        # YENİ EKLENEN FİLTRE: 1 olarak girilen yaşları 'Yok' say (NaN yap)
-        age_data['YAS'] = age_data['YAS'].replace(1, np.nan)
+        # YAS sütunu zaten en başta (work=df.copy() sonrası) Temizlendi
         
         # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
         age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
@@ -1251,15 +1274,9 @@ if "YAS" in work.columns:
     age_data['TETKIK_ISMI'] = "YAS" # PARAMS'a eklediğimiz anahtarla eşleşir
     age_data = age_data.rename(columns={'YAS': '__VAL_NUM__'}) # Değer sütunu
     
-    # 3. Sayısal olduğundan emin ol (coerce_numeric yukarıda tanımlı olmalı)
-    age_data['__VAL_NUM__'] = coerce_numeric(age_data['__VAL_NUM__'])
+    # 3. Sayısal olduğundan emin ol (YAS SÜTUNU ZATEN YUKARIDA (satır 450) TEMİZLENDİ)
     
-    # YENİ EKLENEN FİLTRE: 1 olarak girilen yaşları 'Yok' say (NaN yap)
-    age_data['__VAL_NUM__'] = age_data['__VAL_NUM__'].replace(1, np.nan)
-    
-    age_data = age_data.dropna(subset=['__VAL_NUM__'])
-    
-    age_data_to_add = age_data
+    age_data_to_add = age_data.dropna(subset=['__VAL_NUM__'])
 else:
     st.info("Pivot tabloya 'YaS' eklemek için 'YAS' adında bir sütun bulunamadı. (Adım 1 ve 2'yi kontrol edin)")
 

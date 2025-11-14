@@ -668,6 +668,9 @@ if variant_choice != "(Tümü)":
         # Protokol başına benzersiz yaş al
         age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
         age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce')
+            
+        # YENİ EKLENEN FİLTRE: 1 olarak girilen yaşları 'Yok' say (NaN yap)
+        age_data['YAS'] = age_data['YAS'].replace(1, np.nan)
         
         # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
         age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')

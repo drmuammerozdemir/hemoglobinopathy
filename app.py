@@ -1468,65 +1468,86 @@ else:
     )
 
 # ================= BLOK SONU ================= #
+# ================= EK ANALİZ: Beta Talasemi Taşıyıcılarında Normal MCV ve MCH ================= #
 st.divider()
-st.subheader("🩸 Beta Talasemi Taşıyıcılarında (HbA2↑) MCV Analizi")
+st.subheader("🩸 Beta Talasemi Taşıyıcılarında (HbA2↑) Normal MCV & MCH Analizi")
 
-# 1. Hedef kitleyi belirle: Etiketi "HbA2↑ (B-thal Trait)" olanlar
+# 1. Hedef kitleyi belirle
 target_tag = "HbA2↑ (B-thal Trait)"
-# Bu etikete sahip benzersiz protokol numaralarını bul
-b_thal_protocols = work.loc[work["VARIANT_TAG"] == target_tag, "PROTOKOL_NO"].unique()
+subset_indices = work[work["VARIANT_TAG"] == target_tag].index
 
-if len(b_thal_protocols) > 0:
-    # 2. Bu protokollerin "Hemogram/MCV" değerlerini çek
-    # (Not: Excel'deki MCV adınız farklıysa buradaki "Hemogram/MCV"yi düzeltin)
-    mcv_rows = work[
-        (work["PROTOKOL_NO"].isin(b_thal_protocols)) & 
-        (work["TETKIK_ISMI"] == "Hemogram/MCV") & 
-        (work["__VAL_NUM__"].notna())
-    ].copy()
+if not subset_indices.empty:
+    # 2. Sadece bu gruba ait ve sadece MCV/MCH satırlarını al
+    relevant_tests = ["Hemogram/MCV", "Hemogram/MCH"]
+    # Ana veriden (work) ilgili satırları çek
+    subset_data = work.loc[subset_indices]
+    subset_data = subset_data[subset_data["TETKIK_ISMI"].isin(relevant_tests) & subset_data["__VAL_NUM__"].notna()]
 
-    if not mcv_rows.empty:
-        # 3. Sınıflandırma yap (Normal >= 80 vs Düşük < 80)
-        # Normal MCV'li Taşıyıcılar
-        normal_mcv_df = mcv_rows[mcv_rows["__VAL_NUM__"] >= 80]
-        normal_mcv_count = len(normal_mcv_df)
-        
-        # Mikrositik (Düşük) MCV'li Taşıyıcılar
-        low_mcv_df = mcv_rows[mcv_rows["__VAL_NUM__"] < 80]
-        low_mcv_count = len(low_mcv_df)
-        
-        total_count = len(mcv_rows)
-
-        # 4. Özet Tabloyu Oluştur
-        mcv_summary_df = pd.DataFrame({
-            "MCV Durumu": ["Normal MCV (≥ 80 fL)", "Düşük MCV (< 80 fL)", "TOPLAM"],
-            "Hasta Sayısı": [normal_mcv_count, low_mcv_count, total_count],
-            "Oran (%)": [
-                f"{(normal_mcv_count/total_count)*100:.1f}%", 
-                f"{(low_mcv_count/total_count)*100:.1f}%", 
-                "100%"
-            ]
-        })
-
-        st.write(f"**{target_tag}** olarak sınıflandırılan hastalarda MCV dağılımı:")
-        st.table(mcv_summary_df)
-        
-        # 5. İsteğe bağlı: Normal MCV'li olanların listesini indirme butonu
-        if normal_mcv_count > 0:
-            # Normal MCV'li protokollerin listesini al
-            normal_mcv_protocols = normal_mcv_df["PROTOKOL_NO"].unique()
-            # Ana veriden bu protokollerin tüm bilgilerini çek
-            normal_mcv_full_data = work[work["PROTOKOL_NO"].isin(normal_mcv_protocols)].copy()
-            
-            csv_normal_mcv = normal_mcv_full_data.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "⬇️ Normal MCV'li Taşıyıcıların Listesini İndir (CSV)",
-                data=csv_normal_mcv,
-                file_name="normal_mcv_b_thal_tasiyicilari.csv",
-                mime="text/csv"
+    if not subset_data.empty:
+        # 3. Veriyi Pivotla: Her protokol bir satır olsun, MCV ve MCH sütun olsun
+        #    (Böylece aynı kişinin hem MCV hem MCH değerini aynı satırda görebiliriz)
+        try:
+            pivot_check = subset_data.pivot_table(
+                index="PROTOKOL_NO", 
+                columns="TETKIK_ISMI", 
+                values="__VAL_NUM__"
             )
+            
+            # Kolon isimlerini sadeleştir (Varsa)
+            if "Hemogram/MCV" in pivot_check.columns and "Hemogram/MCH" in pivot_check.columns:
+                pivot_check = pivot_check.rename(columns={"Hemogram/MCV": "MCV", "Hemogram/MCH": "MCH"})
+                
+                # Sadece her iki değeri de olanları al (Kıyaslama yapabilmek için)
+                valid_data = pivot_check.dropna(subset=["MCV", "MCH"])
+                
+                # 4. Kuralı Uygula: Normal = MCV >= 80 VE MCH >= 27
+                normal_indices = valid_data[
+                    (valid_data["MCV"] >= 80) & 
+                    (valid_data["MCH"] >= 27)
+                ].index # Bu indexler PROTOKOL_NO'dur
+                
+                count_normal = len(normal_indices)
+                count_total = len(valid_data)
+                count_micro_hypo = count_total - count_normal
+                
+                # 5. Tabloyu Oluştur
+                summary_df = pd.DataFrame({
+                    "Durum": [
+                        "Normal İndeksler (MCV≥80 ve MCH≥27)", 
+                        "Mikrositik/Hipokromik (MCV<80 veya MCH<27)", 
+                        "TOPLAM (Verisi Tam Olanlar)"
+                    ],
+                    "Hasta Sayısı": [count_normal, count_micro_hypo, count_total],
+                    "Oran (%)": [
+                        f"{(count_normal/count_total)*100:.1f}%" if count_total else "0%", 
+                        f"{(count_micro_hypo/count_total)*100:.1f}%" if count_total else "0%", 
+                        "100%"
+                    ]
+                })
+
+                st.write(f"**{target_tag}** grubunda hem MCV hem MCH değeri bulunan hastaların analizi:")
+                st.table(summary_df)
+                
+                # 6. İndirme Butonu (Sadece Normal Olanlar)
+                if count_normal > 0:
+                    # Normal olan protokollerin tüm bilgilerini ana 'work'ten çek
+                    # (normal_indices listesi Protokol numaralarını tutuyor)
+                    normal_patients_full = work[work["PROTOKOL_NO"].isin(normal_indices)].copy()
+                    
+                    csv_normal = normal_patients_full.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "⬇️ Normal İndeksli (MCV≥80, MCH≥27) Hastaları İndir (CSV)",
+                        data=csv_normal,
+                        file_name="normal_indeksli_b_thal_tasiyicilari.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.warning("Bu grupta MCV veya MCH testlerinden biri eksik, kıyaslama yapılamadı.")
+                
+        except Exception as e:
+            st.error(f"İndeks analizi sırasında hata: {e}")
     else:
-        st.warning(f"'{target_tag}' grubunda MCV testi bulunamadı. 'Hemogram/MCV' ismini kontrol edin.")
+        st.warning(f"'{target_tag}' grubu için MCV/MCH verisi bulunamadı.")
 else:
     st.info(f"Veri setinde '{target_tag}' grubuna giren hasta bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

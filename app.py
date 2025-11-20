@@ -1525,4 +1525,50 @@ if not subset_indices.empty:
         st.warning(f"'{target_tag}' grubu için MCV/MCH verisi bulunamadı.")
 else:
     st.info(f"Veri setinde '{target_tag}' grubuna giren hasta bulunamadı.")
+# ================= DEBUG: HbA2 Grubunda HbF Dağılımı ================= #
+st.divider()
+st.subheader("🕵️ HbA2↑ Grubunda HbF Dedektifi")
+
+target_group = "HbA2↑ (B-thal Trait)"
+# HbF için olası isimleri kontrol et
+f_cols = ["HbF (%)", "F/", "Hb F", "Hb F (%)"]
+
+# Bu gruba girenleri bul
+indices = work[work["VARIANT_TAG"] == target_group].index
+subset = work.loc[indices].copy()
+
+# HbF sütununu bul (Veride hangisi varsa)
+found_col = None
+for col in f_cols:
+    if col in subset.columns: # TETKIK_ISMI yerine wide formatta bakıyorsak work düzenine dikkat
+         # DİKKAT: 'work' long formatta değil, wide formatta değil. 
+         # 'work' long formattadır. Bu yüzden filtreleme yapmalıyız.
+         pass
+
+# Long formatta (sizin yapınızda) analiz:
+hbf_data = subset[subset["TETKIK_ISMI"].isin(f_cols)].copy()
+
+if not hbf_data.empty:
+    hbf_values = pd.to_numeric(hbf_data["__VAL_NUM__"], errors='coerce').dropna()
+    
+    if not hbf_values.empty:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**İstatistikler ({target_group}):**")
+            st.write(f"Min: {hbf_values.min()}")
+            st.write(f"Max: {hbf_values.max()}")
+            st.write(f"Medyan: {hbf_values.median()}")
+            st.write(f"Ortalama: {hbf_values.mean():.2f}")
+        
+        with col2:
+            st.write("**En Yüksek 10 HbF Değeri:**")
+            st.dataframe(hbf_values.sort_values(ascending=False).head(10))
+            
+        if hbf_values.max() > 5.0:
+            st.warning(f"⚠️ Dikkat: Bu grupta %{hbf_values.max()} gibi yüksek HbF değerleri var. Bu hastalar standart sapmayı yükseltiyor.")
+            st.info("Bu hastaların hem A2'si yüksek hem F'si yüksek. Bu yüzden 'HbA2↑' grubuna düştüler.")
+    else:
+        st.warning("HbF değerleri sayıya çevrilemedi.")
+else:
+    st.warning("Bu grupta HbF tetkiki bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

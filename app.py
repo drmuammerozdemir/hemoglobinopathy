@@ -544,7 +544,6 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             return clean_values.iloc[0] 
 
     # --- KURAL 1: KOMPLEKS/KANTİTATİF TANI ---
-    
     def get_val(df, keys):
         if isinstance(keys, str): keys = {keys}
         all_keys = set(keys)
@@ -552,7 +551,6 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             if k in PARAMS: 
                 display_name = PARAMS[k][0]
                 all_keys.update({p_key for p_key, (disp, ref) in PARAMS.items() if disp == display_name})
-                
         s = df.loc[df["TETKIK_ISMI"].isin(all_keys), "__VAL_NUM__"].dropna()
         return s.max() if not s.empty else np.nan
 
@@ -575,8 +573,8 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     hba_present = (a > 1.0) if pd.notna(a) else False 
     
     # Yardımcı Mantıklar
-    has_micro_hypo = (mcv_val < 80) or (mch_val < 27)
-    is_normocytic_normochromic = (mcv_val >= 80) and (mch_val >= 27) # Borderline için
+    has_micro_hypo = (mcv_val < 80) or (mch_val < 27) # Mikrositoz veya Hipokromi
+    is_normocytic_normochromic = (mcv_val >= 80) and (mch_val >= 27)
     
     tags = [] 
 
@@ -607,11 +605,16 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         if not has_micro_hypo and hbf_val > 5: tags.append("HPFH?")
         else: tags.append("HbF↑") 
 
-    # --- KURAL 4: BORDERLINE HbA2 (YENİ EKLENDİ) ---
-    # Kriter: 3.3 <= A2 <= 3.8 VE MCV >= 80 VE MCH >= 27
+    # --- KURAL 4: BORDERLINE HbA2 ---
     if (hba2_val >= 3.3 and hba2_val <= 3.8) and is_normocytic_normochromic:
         tags.append("Borderline HbA2")
-            
+
+    # --- KURAL 5: DEMİR EKSİKLİĞİ / ALFA TALASEMİ (YENİ EKLENDİ) ---
+    # Kriter: MCV < 80 veya MCH < 27 (Mikro/Hipo) VE A2 < 3.5 (Normal)
+    # (Not: F yüksekliği zaten kural 1b ile δβ-thal'e gider, o yüzden burada F normal kabul edilir)
+    if has_micro_hypo and hba2_val < 3.5 and hbf_val < 5.0:
+        tags.append("Iron Def./Alpha-thal?")
+
     # Diğer Varyantlar
     for k, var_name in NUMVAR_FROM_TEST.items():
         val = get_val(g, {k}) 
@@ -620,6 +623,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             if var_name == "HbS" and val < 50: tags.append("HbS Trait")
             else: tags.append(var_name)
     
+    # Eğer hiçbir kurala uymadıysa 'Normal' kabul et
     if not tags: return "Normal (Assumed)" 
     
     # --- FİNAL ÖNCELİK LİSTESİ ---
@@ -632,7 +636,8 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "HbS", "HbC", "HbD", "HbE", "USV",
         "HbS Trait",
         "HbA2↑ (B-thal Trait)",
-        "Borderline HbA2", # YENİ: Listeye eklendi (Taşıyıcılıktan hemen sonra)
+        "Borderline HbA2",
+        "Iron Def./Alpha-thal?", # YENİ: Listeye eklendi
         "HPFH?",
         "HbF↑",
         "Normal (Assumed)", "Normal"

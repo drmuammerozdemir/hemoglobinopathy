@@ -1530,7 +1530,7 @@ if not subset_indices.empty:
         st.warning(f"'{target_tag}' grubu için MCV/MCH verisi bulunamadı.")
 else:
     st.info(f"Veri setinde '{target_tag}' grubuna giren hasta bulunamadı.")
-# ================= DEBUG: HbA2 Grubunda HbF Dağılımı ================= #
+# ================= DEBUG: HbA2 Grubunda HbF Dedektifi ================= #
 st.divider()
 st.subheader("🕵️ HbA2↑ Grubunda HbF Dedektifi")
 
@@ -1542,14 +1542,6 @@ f_cols = ["HbF (%)", "F/", "Hb F", "Hb F (%)"]
 indices = work[work["VARIANT_TAG"] == target_group].index
 subset = work.loc[indices].copy()
 
-# HbF sütununu bul (Veride hangisi varsa)
-found_col = None
-for col in f_cols:
-    if col in subset.columns: # TETKIK_ISMI yerine wide formatta bakıyorsak work düzenine dikkat
-         # DİKKAT: 'work' long formatta değil, wide formatta değil. 
-         # 'work' long formattadır. Bu yüzden filtreleme yapmalıyız.
-         pass
-
 # Long formatta (sizin yapınızda) analiz:
 hbf_data = subset[subset["TETKIK_ISMI"].isin(f_cols)].copy()
 
@@ -1557,6 +1549,11 @@ if not hbf_data.empty:
     hbf_values = pd.to_numeric(hbf_data["__VAL_NUM__"], errors='coerce').dropna()
     
     if not hbf_values.empty:
+        # YENİ: %2'den yüksek olanları say
+        high_f_count = (hbf_values > 2.0).sum()
+        total_count_f = len(hbf_values)
+        high_f_ratio = (high_f_count / total_count_f) * 100
+        
         col1, col2 = st.columns(2)
         with col1:
             st.write(f"**İstatistikler ({target_group}):**")
@@ -1564,6 +1561,8 @@ if not hbf_data.empty:
             st.write(f"Max: {hbf_values.max()}")
             st.write(f"Medyan: {hbf_values.median()}")
             st.write(f"Ortalama: {hbf_values.mean():.2f}")
+            # YENİ GÖSTERİM:
+            st.metric(label="HbF > %2 Olan Hasta Sayısı", value=f"{high_f_count} / {total_count_f}", delta=f"%{high_f_ratio:.1f}")
         
         with col2:
             st.write("**En Yüksek 10 HbF Değeri:**")
@@ -1571,7 +1570,7 @@ if not hbf_data.empty:
             
         if hbf_values.max() > 5.0:
             st.warning(f"⚠️ Dikkat: Bu grupta %{hbf_values.max()} gibi yüksek HbF değerleri var. Bu hastalar standart sapmayı yükseltiyor.")
-            st.info("Bu hastaların hem A2'si yüksek hem F'si yüksek. Bu yüzden 'HbA2↑' grubuna düştüler.")
+            st.info("Bu hastaların hem A2'si yüksek hem F'si yüksek olduğu için 'HbA2↑' grubuna düştüler.")
     else:
         st.warning("HbF değerleri sayıya çevrilemedi.")
 else:

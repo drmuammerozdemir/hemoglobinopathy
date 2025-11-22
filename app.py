@@ -666,29 +666,64 @@ if "VARIANT_TAG" not in work.columns:
                    .reset_index())
     work = work.merge(var_map, on="PROTOKOL_NO", how="left")
 
-st.header("📋 Varyant Özeti — erişkin eşikleri ile")
-present = [t for t in ["Hb S-β-thal","HbS","HbC","HbD","HbE","HbA2↑","HbF↑","Normal"]
-           if t in set(work["VARIANT_TAG"].dropna())]
-variant_choice = st.selectbox("Varyant seç:", ["(Tümü)"] + present, index=0)
+# ================= VARYANT ÖZETİ (etiketleme ve istatistik) ================= #
+if "VARIANT_TAG" not in work.columns:
+    var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
+                   .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
+                   .reset_index())
+    work = work.merge(var_map, on="PROTOKOL_NO", how="left")
 
+st.header("📋 Varyant Özeti — erişkin eşikleri ile")
+
+# Mevcut varyantları bul
+present_tags = sorted([t for t in work["VARIANT_TAG"].dropna().unique()])
+
+# --- YENİ: "TOPLAM BETA GRUBU" TANIMI ---
+# Bu liste, toplamak istediğiniz 4 ana grubu içerir
+BETA_CARRIER_GROUP = [
+    "HbA2↑ (B-thal Trait)", # 1. Klasik
+    "Borderline HbA2",      # 2. Sınırda
+    "δβ-thal Trait",        # 3. Yüksek F'li Taşıyıcı
+    "Hb S-β0 thal",         # 4a. S-Beta
+    "Hb S-β+ thal"          # 4b. S-Beta
+]
+
+# Dropdown seçeneklerini oluştur
+custom_options = ["(Tümü)", ">> TOPLAM BETA TAŞIYICI GRUBU (Kombine) <<"] + present_tags
+variant_choice = st.selectbox("Varyant seç:", custom_options, index=0)
+
+# --- FİLTRELEME MANTIĞI ---
 base_v = work.copy()
-if variant_choice != "(Tümü)":
+
+if variant_choice == "(Tümü)":
+    # Hepsini göster, filtreleme yapma
+    pass
+elif variant_choice == ">> TOPLAM BETA TAŞIYICI GRUBU (Kombine) <<":
+    # Sadece o 4 özel grubu filtrele
+    base_v = base_v[base_v["VARIANT_TAG"].isin(BETA_CARRIER_GROUP)]
+    st.info(f"Bu grup şu varyantların toplamından oluşmaktadır: {', '.join(BETA_CARRIER_GROUP)}")
+else:
+    # Tek bir varyant seçildiyse sadece onu filtrele
     base_v = base_v[base_v["VARIANT_TAG"] == variant_choice]
 
-# 1) Tümü için frekans
+
+# 1) Frekans Tablosu (Seçime Göre)
+freq = (base_v["VARIANT_TAG"].value_counts(dropna=True)
+        .rename_axis("Varyant").to_frame("N").reset_index())
+total = int(freq["N"].sum()) if not freq.empty else 0
+if total > 0: freq["%"] = (freq["N"]/total*100).round(2)
+
 if variant_choice == "(Tümü)":
-    freq = (work["VARIANT_TAG"].value_counts(dropna=True)
-            .rename_axis("Varyant").to_frame("N").reset_index())
-    total = int(freq["N"].sum()) if not freq.empty else 0
-    if total > 0: freq["%"] = (freq["N"]/total*100).round(2)
-    st.subheader("Varyant Frekansları")
+    st.subheader("Tüm Varyantların Frekansı")
     st.dataframe(freq, use_container_width=True)
     st.download_button("⬇️ Varyant frekansları (CSV)",
                       data=freq.to_csv(index=False).encode("utf-8-sig"),
                       file_name="varyant_frekans.csv", mime="text/csv")
+else:
+    # Kombine veya tekil seçim yapıldığında da frekansları gösterelim
+    st.write(f"**Seçilen Gruptaki Dağılım (Toplam n={total}):**")
+    st.dataframe(freq, use_container_width=True)
 
-
-# --- DÜZELTİLMİŞ BLOK BAŞLANGICI ---
 
 # 2) Seçilen varyant için ♀/♂ Mean ± SD tablosu
     
@@ -708,15 +743,18 @@ def _mean_sd(s: pd.Series):
     return f"{mean:.2f} ± {std:.2f}"
 
 table_fm = pd.DataFrame()
+# (Tümü) seçili değilse tabloyu oluştur
 if variant_choice != "(Tümü)":
     rows = []
     
     # YENİ: ADIM 1 - YAŞ'ı özel olarak işle
-    # (base_v = seçilen varyanta (örn. HbA2↑) göre filtrelenmiş ana veri)
     if "YAS" in base_v.columns:
         # Protokol başına benzersiz yaş al
         age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
-        # YAS sütunu zaten en başta (work=df.copy() sonrası) Temizlendi
+        age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce')
+            
+        # YENİ EKLENEN FİLTRE: 1 olarak girilen yaşları 'Yok' say (NaN yap)
+        age_data['YAS'] = age_data['YAS'].replace(1, np.nan)
         
         # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
         age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
@@ -734,20 +772,13 @@ if variant_choice != "(Tümü)":
         rows.append({"Parameter": "Yaş (yıl)", "Female (Mean ± SD)": fem_age_str, "Male (Mean ± SD)": male_age_str, "Reference range": ref_range})
 
     # ADIM 2 - Kalan PARAMS'ları (Hemogram, HPLC) işle
-    # (PARAMS sözlüğü kodun en başında global olarak tanımlı)
     for tetkik_key, (disp, ref) in PARAMS.items():
-        
-        # YENİ: YAŞ'ı tekrar işleme (zaten yapıldı)
-        if tetkik_key == "YAS":
-            continue 
+        if tetkik_key == "YAS": continue 
             
         subp = base_v[base_v["TETKIK_ISMI"] == tetkik_key].copy()
-        if subp.empty: 
-            continue
+        if subp.empty: continue
             
         subp = add_numeric_copy(subp)  # __VAL_NUM__ güvence
-        
-        # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
         subp['Gender_Clean'] = subp['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
         fem = _mean_sd(subp.loc[subp['Gender_Clean'] == 'Kadın', "__VAL_NUM__"])
@@ -756,56 +787,15 @@ if variant_choice != "(Tümü)":
         rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
     
     table_fm = pd.DataFrame(rows)
-    st.subheader("♀/♂ Mean ± SD (seçilen varyant)")
+    st.subheader(f"♀/♂ Mean ± SD Tablosu: {variant_choice}")
+    
     if table_fm.empty:
-        st.info("Bu varyant için parametrik veri bulunamadı.")
+        st.info("Bu seçim için parametrik veri bulunamadı.")
     else:
         st.dataframe(table_fm, use_container_width=True)
         st.download_button("⬇️ Tablo #1 (CSV)",
                             data=table_fm.to_csv(index=False).encode("utf-8-sig"),
-                            file_name=f"varyant_ozet_{variant_choice}.csv", mime="text/csv")
-
-# 3) Birleşik tablo (Varyant Frekansları + Mean±SD)
-# (Bu blok silinmişti, YAŞ ile uyumlu çalışması için güncellendi)
-if variant_choice != "(Tümü)":
-    # 'freq' tablosu 'if variant_choice == "(Tümü)"' bloğunda tanımlı DEĞİL,
-    # bu yüzden 'work'ten yeniden hesaplamalıyız.
-    freq_v = (work["VARIANT_TAG"].value_counts(dropna=True)
-                .rename_axis("Varyant").to_frame("N").reset_index())
-    total_v = int(freq_v["N"].sum()) if not freq_v.empty else 0
-    if total_v > 0: freq_v["%"] = (freq_v["N"]/total_v*100).round(2)
-    
-    freq_part = freq_v[freq_v["Varyant"] == variant_choice].copy()
-    if not freq_part.empty:
-        freq_part = freq_part.rename(columns={"Varyant":"Başlık"})
-        freq_part.insert(0,"Bölüm",f"Varyant Frekans ({variant_choice})")
-        
-    msd_part = table_fm.copy()
-    if not msd_part.empty:
-        msd_part = msd_part.rename(columns={"Parameter":"Başlık"})
-        msd_part.insert(0,"Bölüm","♀/♂ Mean ± SD")
-        
-    cols = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
-    for dfc in (freq_part, msd_part):
-        for c in cols:
-            if c not in dfc.columns: dfc[c] = pd.NA # None yerine NA
-            
-    combined_df = pd.concat([freq_part, msd_part], ignore_index=True)
-    # Sütunları yeniden sırala (N,% başa gelsin)
-    cols_order = ["Bölüm","Başlık","N","%","Female (Mean ± SD)","Male (Mean ± SD)","Reference range"]
-    combined_df = combined_df[[c for c in cols_order if c in combined_df.columns]]
-    
-    st.subheader("🧩 Birleşik Tablo (Seçilen Varyant)")
-    st.dataframe(combined_df, use_container_width=True)
-    
-    # --- DÜZELTİLMİŞ SATIR (734) ---
-    st.download_button("⬇️ Birleşik tablo (CSV)",
-                        data=combined_df.to_csv(index=False).encode("utf-8-sig"),
-                        file_name=f"birlesik_{variant_choice}.csv",
-                        mime="text/csv"
-    ) # <-- EKSİK PARANTEZ BURAYA EKLENDİ
-# --- DÜZELTİLMİŞ BLOK SONU ---
-
+                            file_name=f"varyant_ozet_kombine.csv", mime="text/csv")
 
 # ================= Kategorik Veri Analizi — Benzersiz Değerler ================= #
 st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")

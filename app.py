@@ -1541,8 +1541,14 @@ if not subset_indices.empty:
                 # Sadece her iki değeri de olanları al (Kıyaslama yapabilmek için)
                 valid_data = pivot_check.dropna(subset=["MCV", "MCH"])
                 
-            # --- KURAL 4: BORDERLINE HbA2 ---
-            if (hba2_val >= 3.3 and hba2_val <= 3.8) and is_normocytic_normochromic:
+            # --- KURAL 4: BORDERLINE HbA2 (GÜNCELLENDİ - DAHA SIKI) ---
+            # Kriter A: A2 gerçekten sınırda yüksekse (3.6 - 3.9 arası) -> Her durumda şüpheli
+            criteria_a = (hba2_val >= 3.6 and hba2_val < 4.0)
+    
+            # Kriter B: A2 hafif sınırda (3.3 - 3.6) AMA MCV Düşükse (Gizli taşıyıcı şüphesi)
+            criteria_b = (hba2_val >= 3.3 and hba2_val < 3.6) and has_micro_hypo
+    
+            if criteria_a or criteria_b:
                 tags.append("Borderline HbA2")
                 
                 # 5. Tabloyu Oluştur

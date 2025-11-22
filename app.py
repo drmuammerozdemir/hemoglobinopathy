@@ -1448,6 +1448,67 @@ else:
     )
 
 # ================= BLOK SONU ================= #
+# ================= PREVALANS HESAPLAYICI (Epidemiyolojik Karşılaştırma) ================= #
+st.divider()
+st.subheader("📈 Genişletilmiş Beta Talasemi Prevalansı")
+st.caption("Literatürdeki %2'lik orana kıyasla sizin verinizin durumu. Sadece 'HbA2 Yüksekliği' değil, ilişkili diğer gruplar da hesaba katılır.")
+
+# 1. Toplam 'Gerçek' Protokol Sayısı (Payda)
+total_n = work["PROTOKOL_NO"].nunique()
+
+if total_n > 0:
+    # 2. Alt Grupların Sayılarını Al
+    # A. Klasik Taşıyıcılar (Sizin %1.4'ünüz)
+    n_classic = len(work[work["VARIANT_TAG"] == "HbA2↑ (B-thal Trait)"])
+    
+    # B. Sınırda (Borderline) Olanlar
+    # (Not: Kodunuzda "Borderline HbA2" etiketi varsa)
+    n_border = len(work[work["VARIANT_TAG"] == "Borderline HbA2"])
+    
+    # C. Delta-Beta Talasemi (Normal A2, Yüksek F)
+    n_db = len(work[work["VARIANT_TAG"] == "δβ-thal Trait"])
+    
+    # D. HbS-Beta Talasemi (Hem S hem Beta geni var)
+    n_sb = len(work[work["VARIANT_TAG"].astype(str).str.contains("Hb S-β", na=False)])
+    
+    # 3. Toplamları Hesapla
+    total_carriers = n_classic + n_border + n_db + n_sb
+    prevalence = (total_carriers / total_n) * 100
+    
+    # 4. Sonuçları Göster
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        st.metric(
+            label="Klasik Taşıyıcı (HbA2 > 3.5)", 
+            value=f"{n_classic} kişi", 
+            delta=f"%{(n_classic/total_n)*100:.2f}"
+        )
+        
+    with c2:
+        st.metric(
+            label="Genişletilmiş Toplam (Tümü)", 
+            value=f"{total_carriers} kişi", 
+            delta=f"%{prevalence:.2f}",
+            help="Klasik + Borderline + δβ-thal + S-β thal toplamı"
+        )
+        
+    with c3:
+        st.info(f"""
+        **Toplamın İçeriği:**
+        - Klasik HbA2↑: {n_classic}
+        - Borderline: {n_border}
+        - δβ-thal: {n_db}
+        - S-β thal: {n_sb}
+        """)
+        
+    if prevalence < 1.8:
+        st.warning("Toplam oran hala %2'nin altında. 'Iron Def./Alpha-thal?' grubundaki bazı hastalar, A2 değeri baskılanmış (demir eksikliği yüzünden) Beta Talasemi taşıyıcıları olabilir.")
+    else:
+        st.success("Genişletilmiş oran literatürdeki (~%2) beklentiyle uyumlu görünüyor.")
+
+else:
+    st.write("Hesaplanacak veri yok.")
 # ================= EK ANALİZ: Beta Talasemi Taşıyıcılarında Normal MCV ve MCH ================= #
 st.divider()
 st.subheader("🩸 Beta Talasemi Taşıyıcılarında (HbA2↑) Normal MCV & MCH Analizi")

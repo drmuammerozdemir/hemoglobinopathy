@@ -1541,15 +1541,9 @@ if not subset_indices.empty:
                 # Sadece her iki değeri de olanları al (Kıyaslama yapabilmek için)
                 valid_data = pivot_check.dropna(subset=["MCV", "MCH"])
                 
-                # 4. Kuralı Uygula: Normal = MCV >= 80 VE MCH >= 27
-                normal_indices = valid_data[
-                    (valid_data["MCV"] >= 80) & 
-                    (valid_data["MCH"] >= 27)
-                ].index # Bu indexler PROTOKOL_NO'dur
-                
-                count_normal = len(normal_indices)
-                count_total = len(valid_data)
-                count_micro_hypo = count_total - count_normal
+            # --- KURAL 4: BORDERLINE HbA2 ---
+            if (hba2_val >= 3.3 and hba2_val <= 3.8) and is_normocytic_normochromic:
+                tags.append("Borderline HbA2")
                 
                 # 5. Tabloyu Oluştur
                 summary_df = pd.DataFrame({

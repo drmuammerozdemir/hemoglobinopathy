@@ -1533,95 +1533,108 @@ if total_n > 0:
 
 else:
     st.write("Hesaplanacak veri yok.")
-# ================= EK ANALİZ: Beta Talasemi Taşıyıcılarında (HbA2↑) Normal MCV & MCH Analizi ================= #
+# ================= EK ANALİZ: Beta Talasemi ve HbF Kesişimi (Venn Analizi) ================= #
 st.divider()
-st.subheader("🩸 Beta Talasemi Taşıyıcılarında (HbA2↑) Normal MCV & MCH Analizi")
+st.subheader("📊 Beta Talasemi Taşıyıcılarında HbA2 ve HbF Kesişimi")
+st.caption("Bu analiz, HbA2 (>3.5) ve HbF (>2.0) yüksekliğinin birlikteliğini gösterir.")
 
-# 1. Hedef kitleyi belirle (Sadece A2 Taşıyıcıları olarak etiketlenmiş olanlar)
-target_tag = "HbA2↑ (B-thal Trait)"
+# 1. Gerekli Veriyi Hazırla (Pivotlama)
+# Sadece A2 ve F testlerini içeren satırları al
+target_tests_a2 = ["A2/", "HbA2 (%)", "Hb A2", "Hb A2 (%)"]
+target_tests_f  = ["F/", "HbF (%)", "Hb F", "Hb F (%)"]
+all_targets = target_tests_a2 + target_tests_f
 
-# Bu etikete sahip satırların indekslerini bul
-subset_indices = work[work["VARIANT_TAG"] == target_tag].index
+subset = work[work["TETKIK_ISMI"].isin(all_targets) & work["__VAL_NUM__"].notna()].copy()
 
-if not subset_indices.empty:
-    # 2. Sadece bu gruba ait ve sadece MCV/MCH satırlarını al
-    relevant_tests = ["Hemogram/MCV", "Hemogram/MCH"]
+if not subset.empty:
+    # Her protokol için tek satır olacak şekilde pivotla
+    # (Sütunlar: Test isimleri, Değerler: Sonuçlar)
+    pivot_data = subset.pivot_table(
+        index="PROTOKOL_NO", 
+        columns="TETKIK_ISMI", 
+        values="__VAL_NUM__"
+    )
     
-    # Ana veriden (work) ilgili satırları çek (Sadece indekslere göre)
-    subset_data = work.loc[subset_indices]
+    # Sütunları birleştir (Birden fazla A2 ismi varsa tek sütunda topla)
+    # A2 sütunu oluştur (Mevcut olanların maksimumunu al)
+    cols_a2 = [c for c in pivot_data.columns if c in target_tests_a2]
+    pivot_data["FINAL_A2"] = pivot_data[cols_a2].max(axis=1)
     
-    # Sadece MCV ve MCH testlerini filtrele ve değeri boş olmayanları al
-    subset_data = subset_data[subset_data["TETKIK_ISMI"].isin(relevant_tests) & subset_data["__VAL_NUM__"].notna()]
+    # F sütunu oluştur
+    cols_f = [c for c in pivot_data.columns if c in target_tests_f]
+    pivot_data["FINAL_F"] = pivot_data[cols_f].max(axis=1)
+    
+    # Sadece her iki verisi de (veya en az biri) olanları al
+    analysis_df = pivot_data[["FINAL_A2", "FINAL_F"]].dropna(how='all')
+    
+    # 2. Gruplandırma Mantığı
+    # Eşik Değerler
+    CUTOFF_A2 = 3.5
+    CUTOFF_F = 2.0
+    
+    # Mantıksal Kontroller
+    has_high_a2 = analysis_df["FINAL_A2"] > CUTOFF_A2
+    has_high_f  = analysis_df["FINAL_F"]  > CUTOFF_F
+    
+    # 3. Sayımları Yap
+    # Grup 1: Sadece Yüksek A2 (F normal)
+    group_only_a2 = analysis_df[has_high_a2 & (~has_high_f)]
+    n_only_a2 = len(group_only_a2)
+    
+    # Grup 2: Sadece Yüksek F (A2 normal)
+    group_only_f = analysis_df[(~has_high_a2) & has_high_f]
+    n_only_f = len(group_only_f)
+    
+    # Grup 3: HER İKİSİ DE Yüksek
+    group_both = analysis_df[has_high_a2 & has_high_f]
+    n_both = len(group_both)
+    
+    # Toplam "Anormal" Sayısı (Bu 3 grubun toplamı)
+    total_abnormal = n_only_a2 + n_only_f + n_both
+    
+    if total_abnormal > 0:
+        # 4. Sonuç Tablosu
+        venn_df = pd.DataFrame({
+            "Grup Tanımı": [
+                f"Sadece Yüksek HbA2 (>{CUTOFF_A2})",
+                f"Sadece Yüksek HbF (>{CUTOFF_F})",
+                f"HER İKİSİ DE Yüksek (A2>{CUTOFF_A2} ve F>{CUTOFF_F})",
+                "TOPLAM (Anormal Bulgusu Olanlar)"
+            ],
+            "Kişi Sayısı (n)": [n_only_a2, n_only_f, n_both, total_abnormal],
+            "Yüzde (%)": [
+                f"%{(n_only_a2/total_abnormal)*100:.1f}",
+                f"%{(n_only_f/total_abnormal)*100:.1f}",
+                f"%{(n_both/total_abnormal)*100:.1f}",
+                "100%"
+            ]
+        })
+        
+        st.table(venn_df)
+        
+        # 5. Yorum Cümlesi (Otomatik Oluşturulur)
+        st.info(f"**Yorum:** Beta talasemi taşıyıcılığı veya ilişkili hemoglobinopati şüphesi olan {total_abnormal} kişi arasında; "
+                f"{n_only_a2} kişi (%{(n_only_a2/total_abnormal)*100:.1f}) sadece yüksek HbA2'ye, "
+                f"{n_only_f} kişi (%{(n_only_f/total_abnormal)*100:.1f}) sadece yüksek HbF'ye sahipken, "
+                f"**{n_both} kişi (%{(n_both/total_abnormal)*100:.1f}) hem yüksek HbA2 hem de yüksek HbF değerine sahiptir.**")
 
-    if not subset_data.empty:
-        # 3. Veriyi Pivotla: Her protokol bir satır olsun, MCV ve MCH sütun olsun
-        try:
-            pivot_check = subset_data.pivot_table(
-                index="PROTOKOL_NO", 
-                columns="TETKIK_ISMI", 
-                values="__VAL_NUM__"
-            )
+        # 6. İndirme Butonu (Kesişim Kümesi İçin)
+        if n_both > 0:
+            both_high_protocols = group_both.index.tolist()
+            both_high_data = work[work["PROTOKOL_NO"].isin(both_high_protocols)].copy()
             
-            # Kolon isimlerini kontrol et ve sadeleştir
-            if "Hemogram/MCV" in pivot_check.columns and "Hemogram/MCH" in pivot_check.columns:
-                pivot_check = pivot_check.rename(columns={"Hemogram/MCV": "MCV", "Hemogram/MCH": "MCH"})
-                
-                # Sadece HER İKİSİ DE (MCV ve MCH) ölçülmüş olanları al
-                valid_data = pivot_check.dropna(subset=["MCV", "MCH"])
-                
-                if not valid_data.empty:
-                    # 4. Kuralı Uygula: Normal = MCV >= 80 VE MCH >= 27
-                    # (Burada artık 'hba2_val' değişkenine ihtiyacımız yok, zaten grup belli)
-                    
-                    normal_indices = valid_data[
-                        (valid_data["MCV"] >= 80) & 
-                        (valid_data["MCH"] >= 27)
-                    ].index # Bu indexler PROTOKOL_NO'dur
-                    
-                    count_normal = len(normal_indices)
-                    count_total = len(valid_data)
-                    count_micro_hypo = count_total - count_normal
-                    
-                    # 5. Tabloyu Oluştur
-                    summary_df = pd.DataFrame({
-                        "Durum": [
-                            "Normal İndeksler (MCV≥80 ve MCH≥27)", 
-                            "Mikrositik/Hipokromik (MCV<80 veya MCH<27)", 
-                            "TOPLAM (Verisi Tam Olanlar)"
-                        ],
-                        "Hasta Sayısı": [count_normal, count_micro_hypo, count_total],
-                        "Oran (%)": [
-                            f"{(count_normal/count_total)*100:.1f}%" if count_total else "0%", 
-                            f"{(count_micro_hypo/count_total)*100:.1f}%" if count_total else "0%", 
-                            "100%"
-                        ]
-                    })
+            csv_both = both_high_data.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Hem A2 Hem F Yüksek Olanları İndir (CSV)",
+                data=csv_both,
+                file_name="hem_a2_hem_f_yuksek_hastalar.csv",
+                mime="text/csv"
+            )
 
-                    st.write(f"**{target_tag}** grubunda hem MCV hem MCH değeri bulunan hastaların analizi:")
-                    st.table(summary_df)
-                    
-                    # 6. İndirme Butonu (Sadece Normal Olanlar)
-                    if count_normal > 0:
-                        normal_patients_full = work[work["PROTOKOL_NO"].isin(normal_indices)].copy()
-                        
-                        csv_normal = normal_patients_full.to_csv(index=False).encode("utf-8-sig")
-                        st.download_button(
-                            "⬇️ Normal İndeksli (Sessiz?) Taşıyıcıları İndir (CSV)",
-                            data=csv_normal,
-                            file_name="normal_indeksli_b_thal_tasiyicilari.csv",
-                            mime="text/csv"
-                        )
-                else:
-                    st.warning("HbA2 taşıyıcıları grubunda, aynı anda hem MCV hem MCH sonucu olan kayıt bulunamadı.")
-            else:
-                st.warning("Bu grupta MCV veya MCH testlerinden biri eksik veya isimleri farklı.")
-                
-        except Exception as e:
-            st.error(f"İndeks analizi sırasında hata oluştu: {e}")
     else:
-        st.warning(f"'{target_tag}' grubu için MCV/MCH verisi bulunamadı.")
+        st.info("Veri setinde A2 veya F yüksekliği olan kayıt bulunamadı.")
 else:
-    st.info(f"Veri setinde '{target_tag}' grubuna giren hasta bulunamadı.")
+    st.warning("Analiz için gerekli A2 veya F verisi bulunamadı.")
 # ================= DEBUG: HbA2 Grubunda HbF Dedektifi ================= #
 st.divider()
 st.subheader("🕵️ HbA2↑ Grubunda HbF Dedektifi")

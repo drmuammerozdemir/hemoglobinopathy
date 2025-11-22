@@ -686,6 +686,7 @@ BETA_CARRIER_GROUP = [
     "δβ-thal Trait",        # 3. Yüksek F'li Taşıyıcı
     "Hb S-β0 thal",         # 4a. S-Beta
     "Hb S-β+ thal"          # 4b. S-Beta
+    "HbF↑"                  # 5. HbF↑
 ]
 
 # Dropdown seçeneklerini oluştur

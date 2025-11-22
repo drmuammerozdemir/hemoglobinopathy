@@ -617,11 +617,14 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     if has_micro_hypo and hba2_val < 3.3 and hbf_val < 5.0:
         tags.append("Iron Def./Alpha-thal?")
         
-    # E) HPFH (>2.0 F ve Normal İndeksler)
-    if hbf_val > 2.0 and not has_micro_hypo:
-        tags.append("HPFH?")
-    elif hbf_val > 2.0:
-         tags.append("HbF↑")
+    # E) HbF YÜKSEKLİĞİ (DÜZELTİLMİŞ)
+    if hbf_val > 2.0:
+        # HPFH Şüphesi için kriteri yükselttik: F > 5.0 VE Normal İndeksler
+        if (not has_micro_hypo) and hbf_val > 5.0:
+            tags.append("HPFH?")
+        else:
+            # F > 2.0 olan ama HPFH kriterine uymayan herkes buraya
+            tags.append("HbF↑")
 
     # --- Diğer Varyantlar ---
     for k, var_name in NUMVAR_FROM_TEST.items():

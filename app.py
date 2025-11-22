@@ -1336,7 +1336,7 @@ else:
             max_val = s.max()
             return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]"
 
-    # --- TABLO GÖSTERME YARDIMCISI (Değişiklik yok) ---
+    # --- TABLO GÖSTERME YARDIMCISI (GÜNCELLENDİ - TOPLAM SÜTUNU İÇİN) ---
     def _process_and_display_pivot(pivot_df, table_title, table_key, file_name_suffix):
         display_map = {k: v[0] for k, v in PARAMS.items()}
         ordered_params_in_table = [
@@ -1348,19 +1348,31 @@ else:
             st.info(f"'{table_title}' için parametre bulunamadı.")
             return
 
+        # 1. Satırları Sırala ve İsimlendir
         final_pivot_table = pivot_df.loc[ordered_params_in_table]
         final_pivot_table.index = final_pivot_table.index.map(display_map)
         final_pivot_table = final_pivot_table.rename_axis("Parametre")
         
+        # 2. Sütun İsimlerini Güncelle (n=, %, F/M)
         if rename_map:
-            existing_cols_to_rename = {
+            # 'TOPLAM' sütunu rename_map içinde yoktur, onu korumalıyız
+            cols_to_rename = {
                 col: rename_map[col] for col in final_pivot_table.columns 
                 if col in rename_map
             }
-            final_pivot_table = final_pivot_table.rename(
-                columns=existing_cols_to_rename
-            )
+            final_pivot_table = final_pivot_table.rename(columns=cols_to_rename)
 
+        # 3. Sütun Sıralaması: TOPLAM En Sağa
+        all_cols = list(final_pivot_table.columns)
+        total_cols = [c for c in all_cols if str(c).startswith("TOPLAM")]
+        variant_cols = [c for c in all_cols if not str(c).startswith("TOPLAM")]
+        
+        # Varyantları alfabetik sırala (isteğe bağlı), Toplamı en sona koy
+        variant_cols.sort()
+        final_col_order = variant_cols + total_cols
+        final_pivot_table = final_pivot_table[final_col_order]
+
+        # 4. Göster ve İndir
         st.subheader(table_title)
         st.dataframe(final_pivot_table, use_container_width=True, key=table_key)
         
@@ -1374,6 +1386,11 @@ else:
         )
 
     try:
+        # --- TOPLAM (GENEL) İSTATİSTİĞİ HESAPLA ---
+        # Filtrelenmiş 'data_for_pivot' içindeki benzersiz protokol sayısı
+        total_n_all = data_for_pivot["PROTOKOL_NO"].nunique()
+        total_col_label = f"TOPLAM (n={total_n_all})"
+
         # --- TABLO 1: AKILLI FORMAT (VARSAYILAN) ---
         pivot_table_default = pd.pivot_table(
             data_for_pivot,
@@ -1383,6 +1400,12 @@ else:
             aggfunc=_format_smart_summary_default,
             fill_value="—"
         )
+        
+        # YENİ: Tablo 1 için Toplam Sütununu Hesapla ve Ekle
+        # (Gruplamadan, tüm verinin ortalamasını alır)
+        total_series_1 = data_for_pivot.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_default)
+        pivot_table_default[total_col_label] = total_series_1
+        
         _process_and_display_pivot(
             pivot_table_default, 
             table_title="Tablo 1: Akıllı Format (Normal=SDᵃ, Non-Normal=Medianᵇ)",
@@ -1406,6 +1429,11 @@ else:
             aggfunc=_format_smart_summary_inverted,
             fill_value="—"
         )
+        
+        # YENİ: Tablo 2 için Toplam Sütununu Hesapla ve Ekle (Inverted formatla)
+        total_series_2 = data_for_pivot.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_inverted)
+        pivot_table_inverted[total_col_label] = total_series_2
+        
         _process_and_display_pivot(
             pivot_table_inverted, 
             table_title="Tablo 2: İnvert Edilmiş Format (Normal=Median, Non-Normal=SD)",

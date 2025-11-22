@@ -557,6 +557,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     # Verileri al
     mcv = get_val(g, {"Hemogram/MCV"})
     mch = get_val(g, {"Hemogram/MCH"})
+    hgb = get_val(g, {"Hemogram/HGB"}) # YENİ: Hemoglobin eklendi
     a2 = get_val(g, {"A2/"}) 
     f = get_val(g, {"F/"})   
     s = get_val(g, {"S/"})   
@@ -566,15 +567,35 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     # Değerleri güvenli hale getir (NaN kontrolü)
     mcv_val = mcv if pd.notna(mcv) else 999.0
     mch_val = mch if pd.notna(mch) else 999.0
+    hgb_val = hgb if pd.notna(hgb) else 99.0 # YENİ
     hba2_val = a2 if pd.notna(a2) else 0.0
     hbf_val = f if pd.notna(f) else 0.0
     hbs_val = s if pd.notna(s) else 0.0
     hbc_val = c if pd.notna(c) else 0.0 
     hba_present = (a > 1.0) if pd.notna(a) else False 
     
-    # Yardımcı Mantıklar
-    has_micro_hypo = (mcv_val < 80) or (mch_val < 27) # Mikrositoz veya Hipokromi
+    # --- Yardımcı Mantıklar ---
+    
+    # 1. Mikrositoz / Hipokromi
+    has_micro_hypo = (mcv_val < 80) or (mch_val < 27)
+    
+    # 2. Normositoz (Borderline için)
     is_normocytic_normochromic = (mcv_val >= 80) and (mch_val >= 27)
+    
+    # 3. YENİ: ANEMİ KONTROLÜ (Cinsiyete Göre)
+    is_anemic = False
+    # Cinsiyeti g grubundan çek (İlk dolu değeri al)
+    sex_series = g["CINSIYET"].dropna().astype(str).str.upper()
+    if not sex_series.empty:
+        sex = sex_series.iloc[0]
+        if sex.startswith(('K', 'F')): # Kadın
+            is_anemic = (hgb_val < 12.0)
+        elif sex.startswith(('E', 'M')): # Erkek
+            is_anemic = (hgb_val < 13.0)
+        else:
+            # Cinsiyet bilinmiyorsa genel eşik (örn. 12) kullanılabilir veya anemi yok sayılabilir
+            # Şimdilik güvenli tarafta kalıp 12 kabul edelim
+            is_anemic = (hgb_val < 12.0)
     
     tags = [] 
 
@@ -606,13 +627,17 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         else: tags.append("HbF↑") 
 
     # --- KURAL 4: BORDERLINE HbA2 ---
-    if (hba2_val >= 3.3 and hba2_val <= 3.8) and is_normocytic_normochromic:
+    # Kriter A: A2 3.6 - 3.9 (Net Sınır)
+    criteria_a = (hba2_val >= 3.6 and hba2_val < 4.0)
+    # Kriter B: A2 3.3 - 3.6 VE Düşük MCV/MCH
+    criteria_b = (hba2_val >= 3.3 and hba2_val < 3.6) and has_micro_hypo
+    
+    if criteria_a or criteria_b:
         tags.append("Borderline HbA2")
 
-    # --- KURAL 5: DEMİR EKSİKLİĞİ / ALFA TALASEMİ (YENİ EKLENDİ) ---
-    # Kriter: MCV < 80 veya MCH < 27 (Mikro/Hipo) VE A2 < 3.5 (Normal)
-    # (Not: F yüksekliği zaten kural 1b ile δβ-thal'e gider, o yüzden burada F normal kabul edilir)
-    if has_micro_hypo and hba2_val < 3.5 and hbf_val < 5.0:
+    # --- KURAL 5: DEMİR EKSİKLİĞİ / ALFA TALASEMİ (GÜNCELLENDİ) ---
+    # Kriter: MCV<80 veya MCH<27 (Mikro/Hipo) VE A2<3.5 VE Anemi Var (Hb Düşük)
+    if has_micro_hypo and hba2_val < 3.5 and hbf_val < 5.0 and is_anemic:
         tags.append("Iron Def./Alpha-thal?")
 
     # Diğer Varyantlar
@@ -623,7 +648,6 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
             if var_name == "HbS" and val < 50: tags.append("HbS Trait")
             else: tags.append(var_name)
     
-    # Eğer hiçbir kurala uymadıysa 'Normal' kabul et
     if not tags: return "Normal (Assumed)" 
     
     # --- FİNAL ÖNCELİK LİSTESİ ---
@@ -637,7 +661,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "HbS Trait",
         "HbA2↑ (B-thal Trait)",
         "Borderline HbA2",
-        "Iron Def./Alpha-thal?", # YENİ: Listeye eklendi
+        "Iron Def./Alpha-thal?", 
         "HPFH?",
         "HbF↑",
         "Normal (Assumed)", "Normal"

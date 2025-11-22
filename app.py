@@ -535,7 +535,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     g = add_numeric_copy(g.copy())
     g["TETKIK_ISMI"] = g["TETKIK_ISMI"].astype(str)
     
-    # --- KURAL 0: MANUEL DÜZELTME (En Yüksek Öncelik) ---
+    # --- KURAL 0: MANUEL DÜZELTME ---
     clean_col = "ANORMAL_HB_CLEAN"
     if clean_col in g.columns:
         clean_values = g[clean_col].dropna().astype(str)
@@ -543,7 +543,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         if not clean_values.empty:
             return clean_values.iloc[0] 
 
-    # --- KURAL 1: KOMPLEKS/KANTİTATİF TANI ---
+    # --- VERİLERİ TOPLA ---
     def get_val(df, keys):
         if isinstance(keys, str): keys = {keys}
         all_keys = set(keys)
@@ -554,93 +554,76 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         s = df.loc[df["TETKIK_ISMI"].isin(all_keys), "__VAL_NUM__"].dropna()
         return s.max() if not s.empty else np.nan
 
-    # Verileri al
     mcv = get_val(g, {"Hemogram/MCV"})
     mch = get_val(g, {"Hemogram/MCH"})
-    hgb = get_val(g, {"Hemogram/HGB"}) # YENİ: Hemoglobin eklendi
+    hgb = get_val(g, {"Hemogram/HGB"})
     a2 = get_val(g, {"A2/"}) 
     f = get_val(g, {"F/"})   
     s = get_val(g, {"S/"})   
     a = get_val(g, {"HbA"})  
     c = get_val(g, {"C/"})   
     
-    # Değerleri güvenli hale getir (NaN kontrolü)
+    # Güvenli Değerler
     mcv_val = mcv if pd.notna(mcv) else 999.0
     mch_val = mch if pd.notna(mch) else 999.0
-    hgb_val = hgb if pd.notna(hgb) else 99.0 # YENİ
+    hgb_val = hgb if pd.notna(hgb) else 99.0
     hba2_val = a2 if pd.notna(a2) else 0.0
     hbf_val = f if pd.notna(f) else 0.0
     hbs_val = s if pd.notna(s) else 0.0
     hbc_val = c if pd.notna(c) else 0.0 
     hba_present = (a > 1.0) if pd.notna(a) else False 
     
-    # --- Yardımcı Mantıklar ---
-    
-    # 1. Mikrositoz / Hipokromi
+    # Kriterler
     has_micro_hypo = (mcv_val < 80) or (mch_val < 27)
-    
-    # 2. Normositoz (Borderline için)
-    is_normocytic_normochromic = (mcv_val >= 80) and (mch_val >= 27)
-    
-    # 3. YENİ: ANEMİ KONTROLÜ (Cinsiyete Göre)
-    is_anemic = False
-    # Cinsiyeti g grubundan çek (İlk dolu değeri al)
-    sex_series = g["CINSIYET"].dropna().astype(str).str.upper()
-    if not sex_series.empty:
-        sex = sex_series.iloc[0]
-        if sex.startswith(('K', 'F')): # Kadın
-            is_anemic = (hgb_val < 12.0)
-        elif sex.startswith(('E', 'M')): # Erkek
-            is_anemic = (hgb_val < 13.0)
-        else:
-            # Cinsiyet bilinmiyorsa genel eşik (örn. 12) kullanılabilir veya anemi yok sayılabilir
-            # Şimdilik güvenli tarafta kalıp 12 kabul edelim
-            is_anemic = (hgb_val < 12.0)
     
     tags = [] 
 
-    # --- Kural 1a: Hb S-beta-thal ---
+    # --- KURAL 1: KOMPLEKS VARYANTLAR (S, C, Beta-S vb.) ---
     if has_micro_hypo and hba2_val > 3.5 and hbs_val > 50:
         if hba_present: tags.append("Hb S-β+ thal")
         else: tags.append("Hb S-β0 thal")
     
-    # --- Kural 1b: delta-beta-thal Trait ---
     if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")
         
-    # --- Kural 1c: Hb S/C veya S/O-Arab ---
     if (hbs_val > 0) and (hbc_val > 0) and (not hba_present):
         tags.append("Hb S/C or S/O-Arab?") 
 
-    # --- KURAL 2: METİN BAZLI TANI ---
+    # --- KURAL 2: METİN BAZLI ---
     txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
     for v in txt:
         t = norm_anormal_hb_text(v) 
         if t: tags.append(t)
-        
-    # --- KURAL 3: BASİT KANTİTATİF TANI ---
-    if hba2_val > 3.5:
-        tags.append("HbA2↑ (B-thal Trait)")
-        
-    if hbf_val > 2.0: 
-        if not has_micro_hypo and hbf_val > 5: tags.append("HPFH?")
-        else: tags.append("HbF↑") 
 
-    # --- KURAL 4: BORDERLINE HbA2 ---
-    # Kriter A: A2 3.6 - 3.9 (Net Sınır)
-    criteria_a = (hba2_val >= 3.6 and hba2_val < 4.0)
-    # Kriter B: A2 3.3 - 3.6 VE Düşük MCV/MCH
-    criteria_b = (hba2_val >= 3.3 and hba2_val < 3.6) and has_micro_hypo
+    # --- KURAL 3: HBA2 VE İNDEKS İLİŞKİSİ (Sizin Metniniz) ---
     
-    if criteria_a or criteria_b:
+    # A) Borderline (3.3 - 3.8 arası VE Düşük İndeksler)
+    # Bu kural metindeki "gray zone"dur.
+    if has_micro_hypo and (hba2_val >= 3.3 and hba2_val <= 3.8):
         tags.append("Borderline HbA2")
+        
+    # B) Klasik Taşıyıcı (> 3.5 VE Düşük İndeksler)
+    # Not: 3.6 hem buraya hem yukarıya girer. Aşağıdaki öncelik listesi Borderline'ı seçecek.
+    if has_micro_hypo and hba2_val > 3.5:
+        tags.append("HbA2↑ (B-thal Trait)")
 
-    # --- KURAL 5: DEMİR EKSİKLİĞİ / ALFA TALASEMİ (GÜNCELLENDİ) ---
-    # Kriter: MCV<80 veya MCH<27 (Mikro/Hipo) VE A2<3.5 VE Anemi Var (Hb Düşük)
-    if has_micro_hypo and hba2_val < 3.5 and hbf_val < 5.0 and is_anemic:
+    # C) Klasik Taşıyıcı (Sadece A2 yüksek, indeksler normal olabilir - Sessiz değil ama atipik)
+    # Metinde yazmasa da A2>3.5 her zaman patolojiktir.
+    if (not has_micro_hypo) and hba2_val > 3.5:
+        tags.append("HbA2↑ (B-thal Trait)")
+
+    # D) Demir Eksikliği / Alfa Talasemi (< 3.5 VE Düşük İndeksler)
+    # Borderline (3.3) sınırının altı.
+    if has_micro_hypo and hba2_val < 3.3 and hbf_val < 5.0:
         tags.append("Iron Def./Alpha-thal?")
+        
+    # E) HPFH (>2.0 F ve Normal İndeksler)
+    if hbf_val > 2.0 and not has_micro_hypo:
+        tags.append("HPFH?")
+    elif hbf_val > 2.0:
+         tags.append("HbF↑")
 
-    # Diğer Varyantlar
+    # --- Diğer Varyantlar ---
     for k, var_name in NUMVAR_FROM_TEST.items():
         val = get_val(g, {k}) 
         if pd.notna(val) and val > 0.1:
@@ -659,8 +642,13 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "Hb S-β-thal",
         "HbS", "HbC", "HbD", "HbE", "USV",
         "HbS Trait",
+        
+        # DİKKAT: Borderline, HbA2↑'nin ÜSTÜNDE. 
+        # Yani A2=3.6 ve MCV<80 ise, sistem ona "Borderline" diyecektir (Sizin metninizdeki gibi).
+        # Eğer A2=3.9 ise Borderline kuralına (max 3.8) uymayacağı için alttaki "HbA2↑" kuralına düşecektir.
+        "Borderline HbA2", 
         "HbA2↑ (B-thal Trait)",
-        "Borderline HbA2",
+        
         "Iron Def./Alpha-thal?", 
         "HPFH?",
         "HbF↑",

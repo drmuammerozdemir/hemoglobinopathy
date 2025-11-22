@@ -787,7 +787,18 @@ if variant_choice != "(Tümü)":
         rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
     
     table_fm = pd.DataFrame(rows)
-    st.subheader(f"♀/♂ Mean ± SD Tablosu: {variant_choice}")
+
+    # --- BAŞLIK İÇİN SAYI HESAPLAMA (YENİ) ---
+    # base_v long format olduğu için (her test bir satır), benzersiz hasta sayısını bulmalıyız
+    unique_pats = base_v[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
+    unique_pats['Gender_Clean'] = unique_pats['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+    
+    n_total = len(unique_pats)
+    n_fem = len(unique_pats[unique_pats['Gender_Clean'] == 'Kadın'])
+    n_male = len(unique_pats[unique_pats['Gender_Clean'] == 'Erkek'])
+
+    # Başlığı sayılarla birlikte yazdır
+    st.subheader(f"♀/♂ Mean ± SD Tablosu: {variant_choice} (n={n_total}) [F: {n_fem}, M: {n_male}]")
     
     if table_fm.empty:
         st.info("Bu seçim için parametrik veri bulunamadı.")

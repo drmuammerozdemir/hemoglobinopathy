@@ -621,10 +621,9 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     # --- Kural 3: Basit Kantitatif ---
     
     # A) Borderline (3.3 - 3.8 arası)
-    # A2 3.6-3.9 arası VEYA (3.3-3.6 arası + düşük indeks)
-    criteria_a = (hba2_val >= 3.6 and hba2_val < 4.0)
-    criteria_b = (hba2_val >= 3.3 and hba2_val < 3.6) and has_micro_hypo
-    if criteria_a or criteria_b:
+    # A2 3.3-3.8 arası
+    criteria_a = (hba2_val >= 3.3 and hba2_val <= 3.8) and has_micro_hypo
+    if criteria_a:
         tags.append("Borderline HbA2")
         
     # B) Klasik A2 Taşıyıcı (> 3.5)

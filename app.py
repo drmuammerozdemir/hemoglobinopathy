@@ -554,31 +554,54 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         s = df.loc[df["TETKIK_ISMI"].isin(all_keys), "__VAL_NUM__"].dropna()
         return s.max() if not s.empty else np.nan
 
+    # Gerekli parametreleri al (RBC ve HGB eklendi)
     mcv = get_val(g, {"Hemogram/MCV"})
     mch = get_val(g, {"Hemogram/MCH"})
-    hgb = get_val(g, {"Hemogram/HGB"})
+    hgb = get_val(g, {"Hemogram/HGB"}) # Anemi kontrolü için
+    rbc = get_val(g, {"Hemogram/RBC"}) # Mentzer İndeksi için
     a2 = get_val(g, {"A2/"}) 
     f = get_val(g, {"F/"})   
     s = get_val(g, {"S/"})   
     a = get_val(g, {"HbA"})  
     c = get_val(g, {"C/"})   
     
-    # Güvenli Değerler
+    # Güvenli Değerler (NaN kontrolü)
     mcv_val = mcv if pd.notna(mcv) else 999.0
     mch_val = mch if pd.notna(mch) else 999.0
     hgb_val = hgb if pd.notna(hgb) else 99.0
+    rbc_val = rbc if pd.notna(rbc) else 0.0
     hba2_val = a2 if pd.notna(a2) else 0.0
     hbf_val = f if pd.notna(f) else 0.0
     hbs_val = s if pd.notna(s) else 0.0
     hbc_val = c if pd.notna(c) else 0.0 
     hba_present = (a > 1.0) if pd.notna(a) else False 
     
-    # Kriterler
+    # --- YENİ MANTIKLAR ---
+    
+    # 1. Mikrositoz / Hipokromi
     has_micro_hypo = (mcv_val < 80) or (mch_val < 27)
+    
+    # 2. Anemi Kontrolü (Cinsiyete göre HGB eşiği)
+    is_anemic = False
+    sex_series = g["CINSIYET"].dropna().astype(str).str.upper()
+    if not sex_series.empty:
+        sex = sex_series.iloc[0]
+        # Kadın < 12, Erkek < 13 (DSÖ Kriterleri)
+        if sex.startswith(('K', 'F')): 
+            is_anemic = (hgb_val < 12.0)
+        elif sex.startswith(('E', 'M')): 
+            is_anemic = (hgb_val < 13.0)
+        else:
+            is_anemic = (hgb_val < 12.0) # Bilinmiyorsa güvenli sınır
+
+    # 3. Mentzer İndeksi (MCV / RBC)
+    # < 13 : Talasemi lehine
+    # > 13 : Demir Eksikliği lehine
+    mentzer_index = (mcv_val / rbc_val) if rbc_val > 0 else 0
     
     tags = [] 
 
-    # --- KURAL 1: KOMPLEKS VARYANTLAR (S, C, Beta-S vb.) ---
+    # --- Kural 1: Kompleks Varyantlar ---
     if has_micro_hypo and hba2_val > 3.5 and hbs_val > 50:
         if hba_present: tags.append("Hb S-β+ thal")
         else: tags.append("Hb S-β0 thal")
@@ -589,42 +612,45 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     if (hbs_val > 0) and (hbc_val > 0) and (not hba_present):
         tags.append("Hb S/C or S/O-Arab?") 
 
-    # --- KURAL 2: METİN BAZLI ---
+    # --- Kural 2: Metin Bazlı ---
     txt = g.loc[g["TETKIK_ISMI"] == "Anormal Hb/", "TEST_DEGERI"].dropna().astype(str)
     for v in txt:
         t = norm_anormal_hb_text(v) 
         if t: tags.append(t)
 
-    # --- KURAL 3: HBA2 VE İNDEKS İLİŞKİSİ (Sizin Metniniz) ---
+    # --- Kural 3: Basit Kantitatif ---
     
-    # A) Borderline (3.3 - 3.8 arası VE Düşük İndeksler)
-    # Bu kural metindeki "gray zone"dur.
-    if has_micro_hypo and (hba2_val >= 3.3 and hba2_val <= 3.8):
+    # A) Borderline (3.3 - 3.8 arası)
+    # A2 3.6-3.9 arası VEYA (3.3-3.6 arası + düşük indeks)
+    criteria_a = (hba2_val >= 3.6 and hba2_val < 4.0)
+    criteria_b = (hba2_val >= 3.3 and hba2_val < 3.6) and has_micro_hypo
+    if criteria_a or criteria_b:
         tags.append("Borderline HbA2")
         
-    # B) Klasik Taşıyıcı (> 3.5 VE Düşük İndeksler)
-    # Not: 3.6 hem buraya hem yukarıya girer. Aşağıdaki öncelik listesi Borderline'ı seçecek.
-    if has_micro_hypo and hba2_val > 3.5:
-        tags.append("HbA2↑ (B-thal Trait)")
-
-    # C) Klasik Taşıyıcı (Sadece A2 yüksek, indeksler normal olabilir - Sessiz değil ama atipik)
-    # Metinde yazmasa da A2>3.5 her zaman patolojiktir.
-    if (not has_micro_hypo) and hba2_val > 3.5:
-        tags.append("HbA2↑ (B-thal Trait)")
-
-    # D) Demir Eksikliği / Alfa Talasemi (< 3.5 VE Düşük İndeksler)
-    # Borderline (3.3) sınırının altı.
-    if has_micro_hypo and hba2_val < 3.3 and hbf_val < 5.0:
-        tags.append("Iron Def./Alpha-thal?")
-        
-    # E) HbF YÜKSEKLİĞİ (DÜZELTİLMİŞ)
+    # B) Klasik A2 Taşıyıcı (> 3.5)
+    if hba2_val > 3.5: tags.append("HbA2↑ (B-thal Trait)")
+    
+    # C) HPFH
     if hbf_val > 2.0:
-        # HPFH Şüphesi için kriteri yükselttik: F > 5.0 VE Normal İndeksler
-        if (not has_micro_hypo) and hbf_val > 5.0:
-            tags.append("HPFH?")
+        if (not has_micro_hypo) and hbf_val > 5.0: tags.append("HPFH?")
+        else: tags.append("HbF↑")
+
+    # D) DEMİR EKSİKLİĞİ ve ALFA TALASEMİ AYRIMI (GELİŞMİŞ)
+    # Kriter: Mikrositik/Hipokromik VE Normal A2 VE Normal F
+    if has_micro_hypo and hba2_val < 3.3 and hbf_val < 5.0:
+        
+        # Senaryo 1: Anemik ise (HGB Düşük)
+        if is_anemic:
+            if mentzer_index > 13:
+                tags.append("Iron Deficiency Anemia (Probable)")
+            else:
+                # Hem anemik hem mentzer < 13 ise karışık/şüpheli
+                tags.append("Iron Def./Alpha-thal? (Anemic)")
+        
+        # Senaryo 2: Anemik Değilse (HGB Normal ama MCV düşük)
+        # Bu durum Alfa Talasemi Taşıyıcılığı için çok tipiktir
         else:
-            # F > 2.0 olan ama HPFH kriterine uymayan herkes buraya
-            tags.append("HbF↑")
+            tags.append("Alpha-thal Carrier? (Probable)")
 
     # --- Diğer Varyantlar ---
     for k, var_name in NUMVAR_FROM_TEST.items():
@@ -645,14 +671,14 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "Hb S-β-thal",
         "HbS", "HbC", "HbD", "HbE", "USV",
         "HbS Trait",
-        
-        # DİKKAT: Borderline, HbA2↑'nin ÜSTÜNDE. 
-        # Yani A2=3.6 ve MCV<80 ise, sistem ona "Borderline" diyecektir (Sizin metninizdeki gibi).
-        # Eğer A2=3.9 ise Borderline kuralına (max 3.8) uymayacağı için alttaki "HbA2↑" kuralına düşecektir.
         "Borderline HbA2", 
         "HbA2↑ (B-thal Trait)",
         
-        "Iron Def./Alpha-thal?", 
+        # YENİ GRUPLAR (Öncelik sırasına göre)
+        "Iron Deficiency Anemia (Probable)",
+        "Iron Def./Alpha-thal? (Anemic)",
+        "Alpha-thal Carrier? (Probable)",
+        
         "HPFH?",
         "HbF↑",
         "Normal (Assumed)", "Normal"
@@ -660,6 +686,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         if p in tags: return p
             
     return tags[0]
+    
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
                    .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))

@@ -619,16 +619,15 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         if t: tags.append(t)
 
     # --- Kural 3: Basit Kantitatif ---
+    # A) Klasik A2 Taşıyıcı (> 3.5)
+    if hba2_val > 3.5: tags.append("HbA2↑ (B-thal Trait)")
     
-    # A) Borderline (3.3 - 3.8 arası)
+    # B) Borderline (3.3 - 3.8 arası)
     # A2 3.3-3.8 arası
     criteria_a = (hba2_val >= 3.3 and hba2_val <= 3.8) and has_micro_hypo
     if criteria_a:
         tags.append("Borderline HbA2")
-        
-    # B) Klasik A2 Taşıyıcı (> 3.5)
-    if hba2_val > 3.5: tags.append("HbA2↑ (B-thal Trait)")
-    
+      
     # C) HPFH
     if hbf_val > 2.0:
         if (not has_micro_hypo) and hbf_val > 5.0: tags.append("HPFH?")

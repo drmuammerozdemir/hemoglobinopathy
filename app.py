@@ -1249,93 +1249,112 @@ if results_rows:
     st.dataframe(res_df, use_container_width=True)
     export_df(res_df, name="tetkik_ozet.csv")
 
-# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v7 - YAS ENTEGRE) ================= #
+# ================= PIVOT: VARYANTLARA GÖRE PARAMETRE ÖZETİ (TABLE 2 - v10 - ÇİFTE SAYIMLI) ================= #
 st.header("🔬 Varyantlara Göre Parametre Özeti")
-st.caption("Görseldeki Table 2'ye benzer pivot tablo. Sütun başlıkları gruptaki Kadın (F) ve Erkek (M) protokol sayılarını (n) içerir.")
+st.caption("Görseldeki Table 2'ye benzer pivot tablo. NOT: HbA2 değeri >3.5 olan 'Borderline' hastalar, hem Borderline hem de Taşıyıcı sütununa dahil edilmiştir.")
 
-# 1. 'PARAMS' sözlüğünde tanımlı testleri (HGB, MCV, A2, F vb. ve YAS) al
+# 1. 'PARAMS' sözlüğünde tanımlı testleri al
 params_to_analyze = list(PARAMS.keys())
 
-# --- Cinsiyet bazlı sütun başlıkları (n=? F/M) ---
-rename_map = {}
-try:
-    data = work[['PROTOKOL_NO', 'VARIANT_TAG', 'CINSIYET']].dropna(subset=['PROTOKOL_NO', 'VARIANT_TAG']).drop_duplicates()
-    data['Gender_Clean'] = data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
-    grouped_counts = data.groupby(['VARIANT_TAG', 'Gender_Clean'])['PROTOKOL_NO'].nunique()
-    counts_pivot = grouped_counts.unstack(fill_value=0)
-    
-    for tag, row in counts_pivot.iterrows():
-        f_count = row.get('Kadın', 0)
-        m_count = row.get('Erkek', 0)
-        o_count = sum(row.get(c, 0) for c in ['Bilinmiyor', 'Çakışma'] if c in row)
-        
-        parts = []
-        if f_count > 0: parts.append(f"F: {f_count}")
-        if m_count > 0: parts.append(f"M: {m_count}")
-        if o_count > 0: parts.append(f"Diğer: {o_count}")
-        
-        if not parts:
-            rename_map[tag] = f"{tag} (n=0)"
-        else:
-            rename_map[tag] = f"{tag} ({', '.join(parts)})"
-
-except KeyError:
-    st.warning("Varyant sayıları (n=? F/M) hesaplanamadı. PROTOKOL_NO veya CINSIYET sütunu eksik olabilir.")
-    rename_map = {}
-except Exception as e:
-    st.warning(f"Cinsiyet sayımı sırasında bir hata oluştu: {e}")
-    rename_map = {}
-
-# --- YENİ BLOK: YAS Verisini Hazırla ---
-age_data_to_add = pd.DataFrame()
-if "YAS" in work.columns:
-    # 1. Protokol başına benzersiz YAS değerini al (long formatta)
-    age_data = work[['PROTOKOL_NO', 'VARIANT_TAG', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
-    
-    # 2. Pivot tabloya uyacak şekilde sütunları yeniden adlandır
-    age_data['TETKIK_ISMI'] = "YAS" # PARAMS'a eklediğimiz anahtarla eşleşir
-    age_data = age_data.rename(columns={'YAS': '__VAL_NUM__'}) # Değer sütunu
-    
-    # 3. Sayısal olduğundan emin ol (YAS SÜTUNU ZATEN YUKARIDA (satır 450) TEMİZLENDİ)
-    
-    age_data_to_add = age_data.dropna(subset=['__VAL_NUM__'])
-else:
-    st.info("Pivot tabloya 'YaS' eklemek için 'YAS' adında bir sütun bulunamadı. (Adım 1 ve 2'yi kontrol edin)")
-
-# 3. Ana Hemogram/HPLC pivotu için veriyi FİLTRELE
-data_for_pivot_main = work[
+# --- VERİ HAZIRLIĞI VE ÇİFTE SAYIM MANTIĞI (BURASI DEĞİŞTİ) ---
+# 1. Ana veriyi al
+data_for_pivot_raw = work[
     work["TETKIK_ISMI"].isin(params_to_analyze) &
     work["VARIANT_TAG"].notna() &
     work["__VAL_NUM__"].notna()
 ].copy()
 
-# 4. YENİ: YAS verisini ana pivot verisiyle BİRLEŞTİR
-data_for_pivot = pd.concat([age_data_to_add, data_for_pivot_main])
+# 2. YAS verisini ekle (Eğer varsa)
+age_data_to_add = pd.DataFrame()
+if "YAS" in work.columns:
+    age_data = work[['PROTOKOL_NO', 'VARIANT_TAG', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
+    age_data['TETKIK_ISMI'] = "YAS"
+    age_data = age_data.rename(columns={'YAS': '__VAL_NUM__'})
+    age_data['__VAL_NUM__'] = coerce_numeric(age_data['__VAL_NUM__']).replace(1, np.nan) # 1 yaş temizliği
+    age_data_to_add = age_data.dropna(subset=['__VAL_NUM__'])
 
-if data_for_pivot.empty:
-    st.info("Pivot tablo için yeterli veri bulunamadı (Ne 'YAS' ne de Hemogram/HPLC).")
+# 3. Ham veriyi birleştir
+data_for_pivot_base = pd.concat([age_data_to_add, data_for_pivot_raw])
+
+if data_for_pivot_base.empty:
+    st.info("Pivot tablo için yeterli veri bulunamadı.")
 else:
+    # --- KRİTİK ADIM: BORDERLINE HASTALARINI BUL VE KOPYALA ---
     
-    # --- İKİ AYRI FORMATLAYICI (Değişiklik yok) ---
+    # A) Borderline etiketli hastaları bul
+    borderline_protocols = work[work["VARIANT_TAG"] == "Borderline HbA2"]["PROTOKOL_NO"].unique()
+    
+    # B) Bunların içinden HbA2'si 3.5'ten büyük olanları tespit et
+    # (A2 değerlerini ana 'work' tablosundan çekiyoruz)
+    a2_tests = ["A2/", "HbA2 (%)", "Hb A2", "Hb A2 (%)"]
+    borderline_a2_values = work[
+        (work["PROTOKOL_NO"].isin(borderline_protocols)) & 
+        (work["TETKIK_ISMI"].isin(a2_tests))
+    ]
+    # A2 > 3.5 olan protokolleri seç
+    double_count_protocols = borderline_a2_values[
+        pd.to_numeric(borderline_a2_values["__VAL_NUM__"], errors='coerce') > 3.5
+    ]["PROTOKOL_NO"].unique()
+    
+    # C) Bu protokollerin verisini kopyala ve etiketini değiştir
+    if len(double_count_protocols) > 0:
+        # Pivot verisinden bu kişilerin satırlarını çek
+        rows_to_duplicate = data_for_pivot_base[data_for_pivot_base["PROTOKOL_NO"].isin(double_count_protocols)].copy()
+        
+        # Etiketlerini "HbA2↑ (B-thal Trait)" olarak değiştir
+        rows_to_duplicate["VARIANT_TAG"] = "HbA2↑ (B-thal Trait)"
+        
+        # D) Ana veriye ekle (Şimdi bu kişiler veride İKİ KERE var)
+        data_for_pivot = pd.concat([data_for_pivot_base, rows_to_duplicate])
+        
+        st.info(f"Bilgi: {len(double_count_protocols)} adet 'Borderline' hasta, A2>3.5 olduğu için 'Beta Talasemi Taşıyıcısı' grubuna da eklendi.")
+    else:
+        data_for_pivot = data_for_pivot_base
+
+    # --- BURADAN SONRASI STANDART PİVOT OLUŞTURMA KODU ---
+    
+    # Başlıkları Hazırla (n=?, %...)
+    # Dikkat: Çifte sayım olduğu için toplam sayı değişebilir, orijinal work üzerinden hesaplayalım
+    rename_map = {}
+    try:
+        # Toplam hasta sayısını 'work'ten al (Tekil hasta sayısı)
+        total_unique_patients = work[work["VARIANT_TAG"].notna()]["PROTOKOL_NO"].nunique()
+        
+        # Grupları sayarken artık 'data_for_pivot' (çoğaltılmış veri) kullanıyoruz
+        # Böylece sayı hem Borderline'da hem Taşıyıcı'da artacak.
+        grouped_counts = data_for_pivot.groupby(['VARIANT_TAG', 'CINSIYET'])['PROTOKOL_NO'].nunique().unstack(fill_value=0)
+        
+        # Sütun isimlerini oluştur
+        for tag in data_for_pivot["VARIANT_TAG"].unique():
+            if tag in grouped_counts.index:
+                row = grouped_counts.loc[tag]
+                # Cinsiyet sayılarını al (Normalize fonksiyonunu burada tekrar uygulamak zor, ham veriden gidelim)
+                # Basitçe o gruptaki E/K sayısına bakalım
+                sub_grp = data_for_pivot[data_for_pivot["VARIANT_TAG"] == tag][["PROTOKOL_NO", "CINSIYET"]].drop_duplicates()
+                sub_grp["Sex"] = sub_grp["CINSIYET"].astype(str).map(normalize_sex_label).fillna("Bilinmiyor")
+                
+                f_count = len(sub_grp[sub_grp["Sex"] == "Kadın"])
+                m_count = len(sub_grp[sub_grp["Sex"] == "Erkek"])
+                n_grp = len(sub_grp)
+                
+                pct = (n_grp / total_unique_patients) * 100
+                
+                gender_str = f"(F: {f_count}, M: {m_count})"
+                rename_map[tag] = f"{tag} (n={n_grp}, {pct:.1f}%) {gender_str}"
+    except Exception as e:
+        st.warning(f"Başlık oluşturma hatası: {e}")
+
+    # Formatlayıcılar
     def _format_smart_summary_default(s: pd.Series):
         s = pd.to_numeric(s, errors="coerce").dropna()
         n = len(s)
         if n == 0: return "—"
         if n == 1: return f"{s.iloc[0]:.2f}"
-        
-        try:
-            norm_label, _ = normality_test_with_p(s)
-        except Exception:
-            norm_label = "bilinmiyor"
-        
-        if norm_label != "normal":
-            med = s.median()
-            min_val = s.min()
-            max_val = s.max()
-            return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]ᵇ"
-        else:
-            mean = s.mean()
-            std = s.std(ddof=1)
+        try: norm_label, _ = normality_test_with_p(s)
+        except: norm_label = "bilinmiyor"
+        if norm_label != "normal": return f"{s.median():.2f} [{s.min():.2f}–{s.max():.2f}]ᵇ"
+        else: 
+            mean = s.mean(); std = s.std(ddof=1)
             if pd.isna(std) or std == 0: return f"{mean:.2f}"
             return f"{mean:.2f} ± {std:.2f}ᵃ"
 
@@ -1344,128 +1363,61 @@ else:
         n = len(s)
         if n == 0: return "—"
         if n == 1: return f"{s.iloc[0]:.2f}"
-        
-        try:
-            norm_label, _ = normality_test_with_p(s)
-        except Exception:
-            norm_label = "bilinmiyor"
-        
+        try: norm_label, _ = normality_test_with_p(s)
+        except: norm_label = "bilinmiyor"
         if norm_label != "normal":
-            mean = s.mean()
-            std = s.std(ddof=1)
+            mean = s.mean(); std = s.std(ddof=1)
             if pd.isna(std) or std == 0: return f"{mean:.2f}"
             return f"{mean:.2f} ± {std:.2f}"
-        else:
-            med = s.median()
-            min_val = s.min()
-            max_val = s.max()
-            return f"{med:.2f} [{min_val:.2f}–{max_val:.2f}]"
+        else: return f"{s.median():.2f} [{s.min():.2f}–{s.max():.2f}]"
 
-    # --- TABLO GÖSTERME YARDIMCISI (GÜNCELLENDİ - TOPLAM SÜTUNU İÇİN) ---
     def _process_and_display_pivot(pivot_df, table_title, table_key, file_name_suffix):
         display_map = {k: v[0] for k, v in PARAMS.items()}
-        ordered_params_in_table = [
-            param_key for param_key in PARAMS.keys() 
-            if param_key in pivot_df.index
-        ]
+        ordered_params_in_table = [k for k in PARAMS.keys() if k in pivot_df.index]
+        if not ordered_params_in_table: return
         
-        if not ordered_params_in_table:
-            st.info(f"'{table_title}' için parametre bulunamadı.")
-            return
-
-        # 1. Satırları Sırala ve İsimlendir
         final_pivot_table = pivot_df.loc[ordered_params_in_table]
         final_pivot_table.index = final_pivot_table.index.map(display_map)
         final_pivot_table = final_pivot_table.rename_axis("Parametre")
         
-        # 2. Sütun İsimlerini Güncelle (n=, %, F/M)
         if rename_map:
-            # 'TOPLAM' sütunu rename_map içinde yoktur, onu korumalıyız
-            cols_to_rename = {
-                col: rename_map[col] for col in final_pivot_table.columns 
-                if col in rename_map
-            }
+            cols_to_rename = {c: rename_map[c] for c in final_pivot_table.columns if c in rename_map}
             final_pivot_table = final_pivot_table.rename(columns=cols_to_rename)
+            
+        # Sıralama: Toplam en sağa
+        cols = list(final_pivot_table.columns)
+        total_cols = [c for c in cols if "TOPLAM" in str(c)]
+        other_cols = [c for c in cols if "TOPLAM" not in str(c)]
+        other_cols.sort()
+        final_pivot_table = final_pivot_table[other_cols + total_cols]
 
-        # 3. Sütun Sıralaması: TOPLAM En Sağa
-        all_cols = list(final_pivot_table.columns)
-        total_cols = [c for c in all_cols if str(c).startswith("TOPLAM")]
-        variant_cols = [c for c in all_cols if not str(c).startswith("TOPLAM")]
-        
-        # Varyantları alfabetik sırala (isteğe bağlı), Toplamı en sona koy
-        variant_cols.sort()
-        final_col_order = variant_cols + total_cols
-        final_pivot_table = final_pivot_table[final_col_order]
-
-        # 4. Göster ve İndir
         st.subheader(table_title)
         st.dataframe(final_pivot_table, use_container_width=True, key=table_key)
-        
         csv_data = final_pivot_table.to_csv(index=True).encode("utf-8-sig")
-        st.download_button(
-            f"⬇️ {table_title} İndir (CSV)",
-            data=csv_data,
-            file_name=f"varyant_pivot_ozet_{file_name_suffix}.csv",
-            mime="text/csv",
-            key=f"download_{table_key}"
-        )
+        st.download_button(f"⬇️ {table_title} İndir (CSV)", data=csv_data, file_name=f"varyant_pivot_ozet_{file_name_suffix}.csv", mime="text/csv", key=f"download_{table_key}")
 
     try:
-        # --- TOPLAM (GENEL) İSTATİSTİĞİ HESAPLA ---
-        # Filtrelenmiş 'data_for_pivot' içindeki benzersiz protokol sayısı
-        total_n_all = data_for_pivot["PROTOKOL_NO"].nunique()
-        total_col_label = f"TOPLAM (n={total_n_all})"
-
-        # --- TABLO 1: AKILLI FORMAT (VARSAYILAN) ---
-        pivot_table_default = pd.pivot_table(
-            data_for_pivot,
-            values="__VAL_NUM__",
-            index="TETKIK_ISMI",
-            columns="VARIANT_TAG",
-            aggfunc=_format_smart_summary_default,
-            fill_value="—"
-        )
+        total_n_unique = work["PROTOKOL_NO"].nunique()
+        total_col_label = f"TOPLAM (n={total_n_unique})"
         
-        # YENİ: Tablo 1 için Toplam Sütununu Hesapla ve Ekle
-        # (Gruplamadan, tüm verinin ortalamasını alır)
-        total_series_1 = data_for_pivot.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_default)
+        # Tablo 1
+        pivot_table_default = pd.pivot_table(data_for_pivot, values="__VAL_NUM__", index="TETKIK_ISMI", columns="VARIANT_TAG", aggfunc=_format_smart_summary_default, fill_value="—")
+        # Toplam sütunu için DUPLICATE OLMAYAN (gerçek) veriyi kullanmalıyız ki ortalama bozulmasın
+        total_series_1 = data_for_pivot_base.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_default)
         pivot_table_default[total_col_label] = total_series_1
         
-        _process_and_display_pivot(
-            pivot_table_default, 
-            table_title="Tablo 1: Akıllı Format (Normal=SDᵃ, Non-Normal=Medianᵇ)",
-            table_key="akilli_format_varsayilan", 
-            file_name_suffix="akilli"
-        )
-        
-        st.caption("""
-            ᵃ: Normal dağılım gösteren veriler (Mean ± SD)  
-            ᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])
-        """)
+        _process_and_display_pivot(pivot_table_default, "Tablo 1: Akıllı Format (Normal=SDᵃ, Non-Normal=Medianᵇ)", "akilli_format_varsayilan", "akilli")
+        st.caption("""ᵃ: Normal dağılım gösteren veriler (Mean ± SD) \nᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])""")
         
         st.divider()
         
-        # --- TABLO 2: İNVERT EDİLMİŞ (TERS) FORMAT ---
-        pivot_table_inverted = pd.pivot_table(
-            data_for_pivot,
-            values="__VAL_NUM__",
-            index="TETKIK_ISMI",
-            columns="VARIANT_TAG",
-            aggfunc=_format_smart_summary_inverted,
-            fill_value="—"
-        )
-        
-        # YENİ: Tablo 2 için Toplam Sütununu Hesapla ve Ekle (Inverted formatla)
-        total_series_2 = data_for_pivot.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_inverted)
+        # Tablo 2
+        pivot_table_inverted = pd.pivot_table(data_for_pivot, values="__VAL_NUM__", index="TETKIK_ISMI", columns="VARIANT_TAG", aggfunc=_format_smart_summary_inverted, fill_value="—")
+        total_series_2 = data_for_pivot_base.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_inverted)
         pivot_table_inverted[total_col_label] = total_series_2
         
-        _process_and_display_pivot(
-            pivot_table_inverted, 
-            table_title="Tablo 2: İnvert Edilmiş Format (Normal=Median, Non-Normal=SD)",
-            table_key="invert_edilmis_format", 
-            file_name_suffix="inverted"
-        )
-
+        _process_and_display_pivot(pivot_table_inverted, "Tablo 2: İnvert Edilmiş Format (Normal=Median, Non-Normal=SD)", "invert_edilmis_format", "inverted")
+        
     except Exception as e:
         st.error(f"Pivot tablo oluşturulurken bir hata oluştu: {e}")
         

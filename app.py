@@ -1397,26 +1397,70 @@ else:
         st.download_button(f"⬇️ {table_title} İndir (CSV)", data=csv_data, file_name=f"varyant_pivot_ozet_{file_name_suffix}.csv", mime="text/csv", key=f"download_{table_key}")
 
     try:
-        total_n_unique = work["PROTOKOL_NO"].nunique()
-        total_col_label = f"TOPLAM (n={total_n_unique})"
+        # --- TOPLAM (GENEL) İSTATİSTİĞİ VE CİNSİYET DAĞILIMINI HESAPLA ---
         
-        # Tablo 1
-        pivot_table_default = pd.pivot_table(data_for_pivot, values="__VAL_NUM__", index="TETKIK_ISMI", columns="VARIANT_TAG", aggfunc=_format_smart_summary_default, fill_value="—")
-        # Toplam sütunu için DUPLICATE OLMAYAN (gerçek) veriyi kullanmalıyız ki ortalama bozulmasın
+        # 1. Benzersiz hasta listesini ve cinsiyetlerini 'base' (çoğaltılmamış) veriden çek
+        unique_patients_all = data_for_pivot_base[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
+        
+        # 2. Cinsiyetleri normalize et
+        unique_patients_all['Sex_Clean'] = unique_patients_all['CINSIYET'].astype(str).map(normalize_sex_label).fillna("Bilinmiyor")
+        
+        # 3. Sayıları hesapla
+        total_n_all = len(unique_patients_all)
+        total_f = len(unique_patients_all[unique_patients_all['Sex_Clean'] == 'Kadın'])
+        total_m = len(unique_patients_all[unique_patients_all['Sex_Clean'] == 'Erkek'])
+        
+        # 4. Başlığı oluştur: "TOPLAM (n=1000) (F: 500, M: 500)"
+        total_col_label = f"TOPLAM (n={total_n_all}) (F: {total_f}, M: {total_m})"
+        
+        # --- TABLO 1: AKILLI FORMAT (VARSAYILAN) ---
+        pivot_table_default = pd.pivot_table(
+            data_for_pivot,
+            values="__VAL_NUM__",
+            index="TETKIK_ISMI",
+            columns="VARIANT_TAG",
+            aggfunc=_format_smart_summary_default,
+            fill_value="—"
+        )
+        
+        # Toplam Sütunu (Hesaplama)
         total_series_1 = data_for_pivot_base.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_default)
         pivot_table_default[total_col_label] = total_series_1
         
-        _process_and_display_pivot(pivot_table_default, "Tablo 1: Akıllı Format (Normal=SDᵃ, Non-Normal=Medianᵇ)", "akilli_format_varsayilan", "akilli")
-        st.caption("""ᵃ: Normal dağılım gösteren veriler (Mean ± SD) \nᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])""")
+        _process_and_display_pivot(
+            pivot_table_default, 
+            table_title="Tablo 1: Akıllı Format (Normal=SDᵃ, Non-Normal=Medianᵇ)",
+            table_key="akilli_format_varsayilan", 
+            file_name_suffix="akilli"
+        )
+        
+        st.caption("""
+            ᵃ: Normal dağılım gösteren veriler (Mean ± SD)  
+            ᵇ: Normal dağılım göstermeyen veya yetersiz veriler (Median [Min–Max])
+        """)
         
         st.divider()
         
-        # Tablo 2
-        pivot_table_inverted = pd.pivot_table(data_for_pivot, values="__VAL_NUM__", index="TETKIK_ISMI", columns="VARIANT_TAG", aggfunc=_format_smart_summary_inverted, fill_value="—")
+        # --- TABLO 2: İNVERT EDİLMİŞ (TERS) FORMAT ---
+        pivot_table_inverted = pd.pivot_table(
+            data_for_pivot,
+            values="__VAL_NUM__",
+            index="TETKIK_ISMI",
+            columns="VARIANT_TAG",
+            aggfunc=_format_smart_summary_inverted,
+            fill_value="—"
+        )
+        
+        # Toplam Sütunu (Hesaplama)
         total_series_2 = data_for_pivot_base.groupby("TETKIK_ISMI")["__VAL_NUM__"].apply(_format_smart_summary_inverted)
         pivot_table_inverted[total_col_label] = total_series_2
         
-        _process_and_display_pivot(pivot_table_inverted, "Tablo 2: İnvert Edilmiş Format (Normal=Median, Non-Normal=SD)", "invert_edilmis_format", "inverted")
+        _process_and_display_pivot(
+            pivot_table_inverted, 
+            table_title="Tablo 2: İnvert Edilmiş Format (Normal=Median, Non-Normal=SD)",
+            table_key="invert_edilmis_format", 
+            file_name_suffix="inverted"
+        )
         
     except Exception as e:
         st.error(f"Pivot tablo oluşturulurken bir hata oluştu: {e}")

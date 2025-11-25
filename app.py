@@ -1058,8 +1058,40 @@ for test_name in ["Kan Grubu/", "Anormal Hb/"]:
                 st.dataframe(all_tests[show_cols].sort_values("TETKIK_ISMI") if not all_tests.empty else all_tests, use_container_width=True)
             else:
                 st.info("Seçilebilir protokol yok.")
-
+                
+        # --- YENİ: Anormal Hb/ Olan Hastaların TÜM Verilerini İndir ---
+        st.divider()
+        st.markdown("### 📥 Anormal Hb/ Kaydı Olanların Tüm Verisi")
+        st.caption("Aşağıdaki buton, 'Anormal Hb/' testi çalışılmış (sonucu ne olursa olsun) tüm protokollerin, hemogram ve diğer HPLC dahil BÜTÜN sonuçlarını indirir.")
+        
+        # 1. Anormal Hb/ testi olan protokolleri bul
+        # (sub_nonempty zaten bu filtreyi içeriyor ama garantilemek için ana 'work'ten çekelim)
+        anormal_hb_protocols = work.loc[work["TETKIK_ISMI"] == "Anormal Hb/", "PROTOKOL_NO"].unique()
+        
+        if len(anormal_hb_protocols) > 0:
+            # 2. Bu protokollerin TÜM verilerini ana 'work' tablosundan çek
+            full_patient_data = work[work["PROTOKOL_NO"].isin(anormal_hb_protocols)].copy()
+            
+            # 3. Okunaklı bir sıralama yap (Önce Protokol, Sonra Tetkik İsmi)
+            full_patient_data = full_patient_data.sort_values(by=["PROTOKOL_NO", "TETKIK_ISMI"])
+            
+            # 4. İndirme butonu
+            csv_full_data = full_patient_data.to_csv(index=False).encode("utf-8-sig")
+            
+            st.download_button(
+                label=f"⬇️ {len(anormal_hb_protocols)} Hastanın Tüm Tetkiklerini İndir (CSV)",
+                data=csv_full_data,
+                file_name="anormal_hb_hastalarinin_tum_verileri.csv",
+                mime="text/csv",
+                key="btn_download_full_anormal_hb_data"
+            )
+        else:
+            st.info("Anormal Hb/ kaydı olan protokol bulunamadı.")
+            
+        # -------------------------------------------------------------
+        
         # Bu özel akışta frekans/ki-kare göstermiyoruz.
+        
         continue  # >>> döngünün geri kalanını Kan Grubu/ için çalıştır
     # ============ STANDART AKIŞ: KAN GRUBU/ (mevcut mantığınız) ============
     # 1) Ham yazımların sayımı

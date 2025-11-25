@@ -751,51 +751,77 @@ else:
     st.dataframe(freq, use_container_width=True)
 
 
-# 2) Seçilen varyant için ♀/♂ Mean ± SD tablosu
-    
-# YENİ: _mean_sd fonksiyonunu (Mean±SD formatlar) buraya geri ekle
+# 2) Seçilen varyant için ♀/♂ İstatistik Tablosu (Seçmeli Format)
+
+# --- Yardımcı Format Fonksiyonları ---
+def fmt(val):
+    if pd.isna(val): return "—"
+    s = f"{val:.2f}"
+    if s.endswith(".00"): return s[:-3]
+    return s
+
 def _mean_sd(s: pd.Series):
     s = pd.to_numeric(s, errors="coerce").dropna()
-    if s.empty:
-        return "—"
-    
+    if s.empty: return "—"
     mean = s.mean()
-    std = s.std(ddof=1) # ddof=1: sample standard deviation
-    
-    # Eğer tek bir değer varsa (std hesaplanamaz, NaN olur)
-    if pd.isna(std) or std == 0:
-        return f"{mean:.2f}"
-    
-    return f"{mean:.2f} ± {std:.2f}"
+    std = s.std(ddof=1)
+    if pd.isna(std) or std == 0: return fmt(mean)
+    return f"{fmt(mean)} ± {fmt(std)}"
+
+def _median_min_max(s: pd.Series):
+    s = pd.to_numeric(s, errors="coerce").dropna()
+    if s.empty: return "—"
+    med = s.median()
+    min_v = s.min()
+    max_v = s.max()
+    return f"{fmt(med)} [{fmt(min_v)}–{fmt(max_v)}]"
 
 table_fm = pd.DataFrame()
-# (Tümü) seçili değilse tabloyu oluştur
 if variant_choice != "(Tümü)":
+    st.divider()
+    
+    # --- YENİ: Format Seçici ---
+    col_head, col_opt = st.columns([2, 3])
+    with col_head:
+        st.subheader(f"♀/♂ Detaylı İstatistikler")
+    with col_opt:
+        stat_mode = st.radio(
+            "Tablo Formatı:",
+            ["Ortalama ± Standart Sapma (Mean ± SD)", "Ortanca [Min - Max] (Median [Min-Max])"],
+            index=0,
+            horizontal=True,
+            key="variant_summary_stat_mode",
+            label_visibility="collapsed"
+        )
+    
+    # Seçime göre başlıkları ve fonksiyonu belirle
+    if "Mean" in stat_mode:
+        col_label_f = "Female (Mean ± SD)"
+        col_label_m = "Male (Mean ± SD)"
+        func_stat = _mean_sd
+    else:
+        col_label_f = "Female (Median [Min-Max])"
+        col_label_m = "Male (Median [Min-Max])"
+        func_stat = _median_min_max
+
     rows = []
     
     # YENİ: ADIM 1 - YAŞ'ı özel olarak işle
     if "YAS" in base_v.columns:
-        # Protokol başına benzersiz yaş al
         age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
-        age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce')
-            
-        # YENİ EKLENEN FİLTRE: 1 olarak girilen yaşları 'Yok' say (NaN yap)
-        age_data['YAS'] = age_data['YAS'].replace(1, np.nan)
-        
-        # Cinsiyetlere göre ayır (normalize_sex_label kullanarak)
+        # 1 yaş temizliği (burada da uygulayalım)
+        age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce').replace(1, np.nan)
         age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
         fem_age = age_data.loc[age_data['Gender_Clean'] == 'Kadın', "YAS"]
         male_age = age_data.loc[age_data['Gender_Clean'] == 'Erkek', "YAS"]
         
-        # Formatla
-        fem_age_str = _mean_sd(fem_age)
-        male_age_str = _mean_sd(male_age)
-        
-        # PARAMS'tan referans aralığını al (eğer varsa)
-        ref_range = PARAMS.get("YAS", ("Yaş (yıl)", "—"))[1] 
-        
-        rows.append({"Parameter": "Yaş (yıl)", "Female (Mean ± SD)": fem_age_str, "Male (Mean ± SD)": male_age_str, "Reference range": ref_range})
+        rows.append({
+            "Parameter": "Yaş (yıl)", 
+            col_label_f: func_stat(fem_age), 
+            col_label_m: func_stat(male_age), 
+            "Reference range": PARAMS.get("YAS", ("Yaş", "—"))[1]
+        })
 
     # ADIM 2 - Kalan PARAMS'ları (Hemogram, HPLC) işle
     for tetkik_key, (disp, ref) in PARAMS.items():
@@ -804,35 +830,35 @@ if variant_choice != "(Tümü)":
         subp = base_v[base_v["TETKIK_ISMI"] == tetkik_key].copy()
         if subp.empty: continue
             
-        subp = add_numeric_copy(subp)  # __VAL_NUM__ güvence
+        subp = add_numeric_copy(subp)
         subp['Gender_Clean'] = subp['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
-        fem = _mean_sd(subp.loc[subp['Gender_Clean'] == 'Kadın', "__VAL_NUM__"])
-        male = _mean_sd(subp.loc[subp['Gender_Clean'] == 'Erkek', "__VAL_NUM__"])
+        fem = subp.loc[subp['Gender_Clean'] == 'Kadın', "__VAL_NUM__"]
+        male = subp.loc[subp['Gender_Clean'] == 'Erkek', "__VAL_NUM__"]
         
-        rows.append({"Parameter": disp, "Female (Mean ± SD)": fem, "Male (Mean ± SD)": male, "Reference range": ref})
+        rows.append({
+            "Parameter": disp, 
+            col_label_f: func_stat(fem), 
+            col_label_m: func_stat(male), 
+            "Reference range": ref
+        })
     
     table_fm = pd.DataFrame(rows)
-
-    # --- BAŞLIK İÇİN SAYI HESAPLAMA (YENİ) ---
-    # base_v long format olduğu için (her test bir satır), benzersiz hasta sayısını bulmalıyız
-    unique_pats = base_v[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
-    unique_pats['Gender_Clean'] = unique_pats['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
-    
-    n_total = len(unique_pats)
-    n_fem = len(unique_pats[unique_pats['Gender_Clean'] == 'Kadın'])
-    n_male = len(unique_pats[unique_pats['Gender_Clean'] == 'Erkek'])
-
-    # Başlığı sayılarla birlikte yazdır
-    st.subheader(f"♀/♂ Mean ± SD Tablosu: {variant_choice} (n={n_total}) [F: {n_fem}, M: {n_male}]")
     
     if table_fm.empty:
-        st.info("Bu seçim için parametrik veri bulunamadı.")
+        st.info("Bu varyant için parametrik veri bulunamadı.")
     else:
         st.dataframe(table_fm, use_container_width=True)
-        st.download_button("⬇️ Tablo #1 (CSV)",
-                            data=table_fm.to_csv(index=False).encode("utf-8-sig"),
-                            file_name=f"varyant_ozet_kombine.csv", mime="text/csv")
+        
+        # Dosya adını formata göre değiştir
+        file_suffix = "mean_sd" if "Mean" in stat_mode else "median_minmax"
+        
+        st.download_button(
+            f"⬇️ Tabloyu İndir (CSV - {file_suffix})",
+            data=table_fm.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"varyant_ozet_{variant_choice}_{file_suffix}.csv", 
+            mime="text/csv"
+        )
 
 # ================= Kategorik Veri Analizi — Benzersiz Değerler ================= #
 st.header("🧬 Kategorik Veri Analizi — Benzersiz Değerler")

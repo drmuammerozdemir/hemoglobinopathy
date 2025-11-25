@@ -751,7 +751,7 @@ else:
     st.dataframe(freq, use_container_width=True)
 
 
-# 2) Seçilen varyant için ♀/♂ İstatistik Tablosu (Seçmeli Format)
+# 2) Seçilen varyant için ♀/♂ İstatistik Tablosu (Seçmeli Format & Sayılar)
 
 # --- Yardımcı Format Fonksiyonları ---
 def fmt(val):
@@ -778,12 +778,25 @@ def _median_min_max(s: pd.Series):
 
 table_fm = pd.DataFrame()
 if variant_choice != "(Tümü)":
+    
+    # --- YENİ: BAŞLIK İÇİN HASTA SAYISINI HESAPLA ---
+    # base_v 'long format' olduğu için (her test bir satır), benzersiz hasta sayısını bulmalıyız
+    unique_pats_stats = base_v[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
+    unique_pats_stats['Gender_Clean'] = unique_pats_stats['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+    
+    n_stat_total = len(unique_pats_stats)
+    n_stat_fem = len(unique_pats_stats[unique_pats_stats['Gender_Clean'] == 'Kadın'])
+    n_stat_male = len(unique_pats_stats[unique_pats_stats['Gender_Clean'] == 'Erkek'])
+    
+    # Başlık Metni
+    header_text = f"♀/♂ İstatistikler (Total: {n_stat_total}) [F: {n_stat_fem}, M: {n_stat_male}]"
+
     st.divider()
     
-    # --- YENİ: Format Seçici ---
-    col_head, col_opt = st.columns([2, 3])
+    # --- Format Seçici ve Başlık ---
+    col_head, col_opt = st.columns([2, 2])
     with col_head:
-        st.subheader(f"♀/♂ Detaylı İstatistikler")
+        st.subheader(header_text)
     with col_opt:
         stat_mode = st.radio(
             "Tablo Formatı:",
@@ -806,10 +819,10 @@ if variant_choice != "(Tümü)":
 
     rows = []
     
-    # YENİ: ADIM 1 - YAŞ'ı özel olarak işle
+    # ADIM 1 - YAŞ'ı özel olarak işle
     if "YAS" in base_v.columns:
         age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
-        # 1 yaş temizliği (burada da uygulayalım)
+        # 1 yaş temizliği
         age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce').replace(1, np.nan)
         age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
@@ -850,9 +863,7 @@ if variant_choice != "(Tümü)":
     else:
         st.dataframe(table_fm, use_container_width=True)
         
-        # Dosya adını formata göre değiştir
         file_suffix = "mean_sd" if "Mean" in stat_mode else "median_minmax"
-        
         st.download_button(
             f"⬇️ Tabloyu İndir (CSV - {file_suffix})",
             data=table_fm.to_csv(index=False).encode("utf-8-sig"),

@@ -1846,4 +1846,108 @@ if not subset_indices.empty:
         st.warning(f"'{target_tag}' grubu için MCV/MCH verisi bulunamadı.")
 else:
     st.info(f"Veri setinde '{target_tag}' grubuna giren hasta bulunamadı.")
+    # ================= YENİ: INTERMEDIA vs TRAIT AYRIM GRAFİĞİ ================= #
+st.divider()
+st.subheader("📉 Klinik Ayrım: Beta Talasemi Minör vs İntermedia")
+st.caption("Bu grafik, 'Minör' ve 'İntermedia' şüphesi olan hastaları **Hemoglobin (HGB)** ve **Fetal Hemoglobin (HbF)** düzeylerine göre ayırır. ")
+
+# 1. Analiz edilecek grupları belirle
+target_variants = [
+    "HbA2↑ (B-thal Trait)", 
+    "Borderline HbA2",
+    "B-thal Intermedia (High A2/High F)",
+    "B-thal Intermedia (High F only)",
+    "B-thal Intermedia? (Mod. F + Severe Anemia)",
+    "δβ-thal Trait"
+]
+
+# 2. Veriyi Hazırla
+# work tablosundan ilgili varyantları ve HGB, HbF değerlerini çek
+# Not: HGB için 'Hemogram/HGB', HbF için 'F/' veya 'HbF (%)' değerlerini __VAL_NUM__ üzerinden değil, tekrar çekmemiz gerekebilir çünkü __VAL_NUM__ tek sütun.
+# En sağlıklısı pivot yapmaktır.
+
+# A) HGB ve HbF verisi olan satırları bul
+hgb_tests = ["Hemogram/HGB"]
+f_tests   = ["F/", "HbF (%)", "Hb F", "Hb F (%)"]
+relevant_tests = hgb_tests + f_tests
+
+subset_graph = work[
+    work["TETKIK_ISMI"].isin(relevant_tests) & 
+    work["VARIANT_TAG"].isin(target_variants)
+].copy()
+
+if not subset_graph.empty:
+    # B) Pivotla (Her protokol tek satır: Sütunlar -> HGB, HbF)
+    # HGB'yi bulmak için haritalama
+    subset_graph["TYPE"] = subset_graph["TETKIK_ISMI"].apply(lambda x: "HGB" if x in hgb_tests else "HbF")
+    
+    pivot_graph = subset_graph.pivot_table(
+        index=["PROTOKOL_NO", "VARIANT_TAG"], 
+        columns="TYPE", 
+        values="__VAL_NUM__"
+    ).reset_index()
+
+    # Hem HGB hem HbF verisi olanları al
+    graph_data = pivot_graph.dropna(subset=["HGB", "HbF"])
+
+    if not graph_data.empty:
+        # 3. Grafiği Çiz (Matplotlib)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Renk paleti
+        colors = {
+            "HbA2↑ (B-thal Trait)": "blue",
+            "Borderline HbA2": "cyan",
+            "B-thal Intermedia (High A2/High F)": "red",
+            "B-thal Intermedia (High F only)": "darkred",
+            "B-thal Intermedia? (Mod. F + Severe Anemia)": "orange",
+            "δβ-thal Trait": "green"
+        }
+        
+        # Her grup için scatter çiz
+        for var_name in graph_data["VARIANT_TAG"].unique():
+            sub_g = graph_data[graph_data["VARIANT_TAG"] == var_name]
+            # Renk eşleşmezse gri yap
+            c = colors.get(var_name, "gray")
+            # Minörleri biraz daha şeffaf yap (çok fazla olabilirler)
+            alpha = 0.5 if "Trait" in var_name else 0.9
+            size = 30 if "Trait" in var_name else 80 # Intermedia'lar daha büyük görünsün
+            
+            ax.scatter(sub_g["HbF"], sub_g["HGB"], label=var_name, color=c, alpha=alpha, s=size, edgecolors='w')
+
+        # 4. Referans Çizgileri (Ayrım Sınırları)
+        # HGB < 10 çizgisi (Yatay)
+        ax.axhline(y=10, color='black', linestyle='--', linewidth=1)
+        ax.text(graph_data["HbF"].max(), 10.2, "Anemi Sınırı (10 g/dL)", ha='right', fontsize=9)
+
+        # HbF > 10 çizgisi (Dikey)
+        ax.axvline(x=10, color='black', linestyle='--', linewidth=1)
+        ax.text(10.5, graph_data["HGB"].max(), "İntermedia Sınırı (%10 HbF)", va='top', fontsize=9, rotation=90)
+
+        # Bölgeleri isimlendir
+        # Sağ Alt Köşe: Düşük HGB, Yüksek F -> INTERMEDIA
+        ax.text(graph_data["HbF"].max()*0.9, graph_data["HGB"].min(), "İNTERMEDİA BÖLGESİ\n(Derin Anemi + Yüksek F)", 
+                ha='right', va='bottom', fontsize=12, fontweight='bold', color='red', alpha=0.3)
+        
+        # Sol Üst/Orta: Yüksek HGB, Düşük F -> MINOR
+        ax.text(2, graph_data["HGB"].max()*0.9, "MİNÖR (TAŞIYICI) BÖLGESİ\n(Hafif Anemi + Düşük F)", 
+                ha='left', va='top', fontsize=12, fontweight='bold', color='blue', alpha=0.3)
+
+        ax.set_xlabel("HbF (%)")
+        ax.set_ylabel("Hemoglobin (g/dL)")
+        ax.set_title("Beta Talasemi Ayrımı: HbF vs Hemoglobin")
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, alpha=0.3)
+
+        st.pyplot(fig)
+        
+        st.info("""
+        **Grafik Yorumu:**
+        * **Kırmızı Noktalar (Sağ Alt):** HbF değerleri yüksek (%10 üzeri) ve Hemoglobinleri düşüktür. Bunlar klinik olarak **İntermedia** tablosudur.
+        * **Mavi Noktalar (Sol Üst):** HbF düşüktür ve anemi hafiftir. Bunlar klasik **Taşıyıcılardır (Minör)**.
+        """)
+    else:
+        st.warning("Grafik için eşleşen HGB ve HbF verisi bulunamadı.")
+else:
+    st.info("Listede grafiklenecek varyant grubu bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")

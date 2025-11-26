@@ -2042,15 +2042,44 @@ if st.checkbox("Yapay Zeka Modülünü Aktif Et", value=False):
     
     if st.button("Modeli Eğit (Random Forest)"):
         try:
+            # Gerekli kütüphaneleri burada import et
             from sklearn.model_selection import train_test_split
             from sklearn.ensemble import RandomForestClassifier
             from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
             import seaborn as sns
 
-            # Train/Test Ayrımı (%80 Eğitim, %20 Test)
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+            # --- YENİ: YETERSİZ VERİ FİLTRESİ (1 Tane Olanları At) ---
+            # Her bir tanıdan kaç tane var sayalım
+            class_counts = y.value_counts()
             
-            # Modeli Kur
+            # Sayısı 2'den az (yani 1) olan tanıları bul
+            rare_classes = class_counts[class_counts < 2].index.tolist()
+            
+            if len(rare_classes) > 0:
+                st.warning(f"⚠️ **Veri Temizliği:** Aşağıdaki tanılar veri setinde sadece 1 kez bulunduğu için model eğitiminden ÇIKARILDI (Modelin hata vermemesi için): \n\n {', '.join(rare_classes)}")
+                
+                # Bu sınıfları veriden (X ve y) filtrele
+                valid_classes = class_counts[class_counts >= 2].index
+                filter_mask = y.isin(valid_classes)
+                
+                X = X[filter_mask]
+                y = y[filter_mask]
+            
+            # Eğer tüm veri silindiyse (Çok nadir bir durum) durdur
+            if len(y) == 0:
+                st.error("Eğitim için yeterli veri kalmadı.")
+                st.stop()
+
+            # --- EĞİTİM (ARTIK GÜVENLİ) ---
+            # Artık her sınıftan en az 2 tane olduğu kesin, stratify=y güvenle kullanılabilir
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, 
+                test_size=0.2, 
+                random_state=42, 
+                stratify=y 
+            )
+            
+            # Modeli Kur (100 ağaçlı orman)
             clf = RandomForestClassifier(n_estimators=100, random_state=42)
             
             with st.spinner("Model eğitiliyor..."):
@@ -2062,42 +2091,48 @@ if st.checkbox("Yapay Zeka Modülünü Aktif Et", value=False):
             
             st.success(f"Model Eğitildi! Başarı Oranı (Accuracy): **%{acc*100:.2f}**")
             
+            if acc > 0.98:
+                st.balloons()
+                st.info("Mükemmel bir sonuç! Kural tabanlı etiketleriniz ile Yapay Zeka'nın bulguları neredeyse birebir örtüşüyor.")
+            
             # 3. Sonuçların Görselleştirilmesi
             st.write("### 3. Model Performansı ve Analiz")
             
-            tab1, tab2, tab3 = st.tabs(["Karmaşıklık Matrisi (Confusion Matrix)", "Özellik Önemi (Feature Importance)", "Sınıflandırma Raporu"])
+            tab1, tab2, tab3 = st.tabs(["Özellik Önemi (Feature Importance)", "Karmaşıklık Matrisi", "Sınıflandırma Raporu"])
             
             with tab1:
-                st.write("Modelin hangi hastalıkları birbiriyle karıştırdığını gösterir.")
-                fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
-                # Benzersiz sınıfları al
-                unique_labels = sorted(list(set(y_test) | set(y_pred)))
-                cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
-                
-                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_labels, yticklabels=unique_labels, ax=ax_cm)
-                plt.ylabel('Gerçek Tanı')
-                plt.xlabel('Modelin Tahmini')
-                plt.xticks(rotation=90)
-                st.pyplot(fig_cm)
-                
-            with tab2:
-                st.write("Modelin karar verirken hangi kan değerine ne kadar önem verdiğini gösterir.")
+                st.write("**Model karar verirken hangi parametreye en çok baktı?**")
                 importances = clf.feature_importances_
                 feature_names = X.columns
                 forest_importances = pd.Series(importances, index=feature_names).sort_values(ascending=False)
                 
                 fig_imp, ax_imp = plt.subplots(figsize=(10, 6))
-                forest_importances.head(15).plot.bar(ax=ax_imp)
+                # İlk 15 özelliği göster
+                forest_importances.head(15).plot.bar(ax=ax_imp, color="skyblue")
                 ax_imp.set_title("En Önemli 15 Özellik")
                 ax_imp.set_ylabel("Önem Skoru")
                 st.pyplot(fig_imp)
+                st.caption("Bu grafik, yapay zekanın tanıyı koyarken en çok hangi laboratuvar değerine güvendiğini gösterir.")
+                
+            with tab2:
+                st.write("**Modelin tahminleri ile gerçek etiketler arasındaki uyum:**")
+                # Sadece test setinde veya tahminde geçen etiketleri al
+                unique_labels = sorted(list(set(y_test) | set(y_pred)))
+                
+                fig_cm, ax_cm = plt.subplots(figsize=(12, 8))
+                cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
+                
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_labels, yticklabels=unique_labels, ax=ax_cm)
+                plt.ylabel('Gerçek Tanı (Sizin Kuralınız)')
+                plt.xlabel('Modelin Tahmini (Yapay Zeka)')
+                plt.xticks(rotation=90)
+                st.pyplot(fig_cm)
                 
             with tab3:
-                report_dict = classification_report(y_test, y_pred, output_dict=True)
+                # Zero division hatasını önlemek için
+                report_dict = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
                 st.dataframe(pd.DataFrame(report_dict).transpose())
 
-        except ImportError:
-            st.error("ML kütüphaneleri eksik. Lütfen terminalde `pip install scikit-learn seaborn` komutunu çalıştırın.")
         except Exception as e:
             st.error(f"Model eğitimi sırasında hata: {e}")
             # Hata ayıklama için detay:

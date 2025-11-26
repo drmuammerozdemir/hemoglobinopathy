@@ -6,3 +6,6 @@ openpyxl
 matplotlib
 scikit-learn
 Seaborn
+xgboost
+lightgbm
+catboost

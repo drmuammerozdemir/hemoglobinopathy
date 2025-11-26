@@ -608,6 +608,16 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     
     if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")
+    # --- YENİ KURAL 1d: BETA TALASEMİ INTERMEDIA / MAJOR ŞÜPHESİ ---
+    # Kriter: Mikrositoz VAR ve HbF Çok Yüksek (> %10)
+    # (Not: S-Beta yukarıda elendiği için buraya sadece Beta türevleri gelir)
+    if has_micro_hypo and hbf_val > 10.0:
+         # A2 de yüksekse klasik Beta Intermedia/Major tablosudur
+         if hba2_val > 3.5:
+             tags.append("B-thal Intermedia/Major? (High A2/F)")
+         else:
+             # A2 normalse (Nadir) ama F çok yüksekse ve hasta mikrositikse
+             tags.append("B-thal Intermedia/Major? (High F)")
         
     if (hbs_val > 0) and (hbc_val > 0) and (not hba_present):
         tags.append("Hb S/C or S/O-Arab?") 
@@ -660,25 +670,29 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     
     if not tags: return "Normal (Assumed)" 
     
-    # --- FİNAL ÖNCELİK LİSTESİ ---
+# --- FİNAL ÖNCELİK LİSTESİ ---
     for p in [
         "Hb S-β0 thal", 
         "Hb S-β+ thal", 
         "Hb S/C or S/O-Arab?", 
+        
+        # YENİ: Intermedia/Major'ları en üste, S-Beta'nın altına ekledik
+        "B-thal Intermedia/Major? (High A2/F)",
+        "B-thal Intermedia/Major? (High F)",
+        
         "δβ-thal Trait",
         "Hb S-β-thal",
         "HbS", "HbC", "HbD", "HbE", "USV",
         "HbS Trait",
-        "Borderline HbA2", 
+        
+        "Borderline HbA2",
         "HbA2↑ (B-thal Trait)",
         
-        # YENİ GRUPLAR (Öncelik sırasına göre)
         "Iron Deficiency Anemia (Probable)",
         "Iron Def./Alpha-thal? (Anemic)",
         "Alpha-thal Carrier? (Probable)",
         
-        "HPFH?",
-        "HbF↑",
+        "HPFH?", "HbF↑",
         "Normal (Assumed)", "Normal"
     ]:
         if p in tags: return p

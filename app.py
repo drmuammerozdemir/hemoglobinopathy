@@ -1959,3 +1959,146 @@ if not subset_graph.empty:
 else:
     st.info("Listede grafiklenecek varyant grubu (A2, Borderline, Intermedia, Delta-Beta) verisi bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
+
+# ================================================================================= #
+#                         🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ                           #
+# ================================================================================= #
+st.divider()
+st.header("🤖 Yapay Zeka (ML) Model Eğitimi ve Analizi")
+st.caption("Mevcut etiketlenmiş veriyi kullanarak bir Sınıflandırma Modeli (Random Forest) eğitir ve performansını gösterir.")
+
+# ML için kullanılacak özelliklerin (Feature) listesi
+# Bu isimler Excel'deki TETKIK_ISMI ile BİREBİR aynı olmalıdır.
+ML_FEATURES = [
+    "Hemogram/HGB", "Hemogram/RBC", "Hemogram/MCV", "Hemogram/MCH", "Hemogram/RDW", # Hemogram
+    "HbA2 (%)", "A2/", # A2 (İki ihtimali de arayacağız)
+    "HbF (%)", "F/",   # F
+    "HbS (%)", "S/",   # S
+    "HbC (%)", "C/",   # C
+    "HbD (%)", "D/",   # D
+    "HbA", "HbA (%)"   # A
+]
+
+# ML Başlatma Butonu
+if st.checkbox("Yapay Zeka Modülünü Aktif Et", value=False):
+    
+    # 1. Veri Hazırlığı (Long -> Wide Format Dönüşümü)
+    st.write("### 1. Veri Hazırlığı")
+    
+    # Etiketlenmiş veriyi al
+    if "VARIANT_TAG" not in work.columns:
+        st.error("Önce yukarıdaki analizlerin tamamlanması ve VARIANT_TAG oluşması gerekir.")
+        st.stop()
+        
+    labeled_data = work[work["VARIANT_TAG"].notna()].copy()
+    
+    if labeled_data.empty:
+        st.warning("Etiketlenmiş veri bulunamadı.")
+        st.stop()
+
+    with st.spinner("Veri ML formatına dönüştürülüyor (Pivotlama)..."):
+        # Sadece sayısal değeri olan ve ML_FEATURES listesindeki testleri al
+        ml_subset = labeled_data[
+            labeled_data["TETKIK_ISMI"].isin(ML_FEATURES) & 
+            labeled_data["__VAL_NUM__"].notna()
+        ].copy()
+        
+        # PIVOTLAMA: Satırlar=Protokol, Sütunlar=Tetkik, Değerler=Sonuç
+        X = ml_subset.pivot_table(
+            index="PROTOKOL_NO", 
+            columns="TETKIK_ISMI", 
+            values="__VAL_NUM__"
+        )
+        
+        # Sütun isimlerini sadeleştirme (Aynı testin farklı isimlerini birleştirme)
+        # Örn: Hem 'A2/' hem 'HbA2 (%)' varsa bunları tek sütuna indirmeliyiz.
+        # Şimdilik basitçe NaN'ları 0 ile doldurup devam edeceğiz.
+        
+        # Eksik Veri Yönetimi (Imputation)
+        # HPLC verileri (A2, F, S, C...) eksikse 0 kabul edilebilir.
+        # Hemogram verileri (MCV, HGB) eksikse o satırı atmak veya ortalama vermek gerekir.
+        # Basitlik için: Hepsini 0 ile dolduralım (HPLC mantığına uygun)
+        X = X.fillna(0)
+        
+        # Hedef Değişkeni (y) Al: VARIANT_TAG
+        # Her protokolün etiketini ana tablodan çek
+        y_map = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["VARIANT_TAG"]
+        
+        # X ve y'yi eşleştir (Sadece her ikisi de olan protokoller)
+        common_indices = X.index.intersection(y_map.index)
+        X = X.loc[common_indices]
+        y = y_map.loc[common_indices]
+        
+        st.success(f"Veri Hazır: {X.shape[0]} Hasta, {X.shape[1]} Özellik (Parametre) kullanılarak model eğitilecek.")
+        
+        # Veri Önizleme
+        with st.expander("Eğitim Verisini Gör (X ve y)"):
+            st.dataframe(X.head())
+            st.write("**Hedef Sınıflar (y):**")
+            st.write(y.value_counts())
+
+    # 2. Model Eğitimi
+    st.write("### 2. Model Eğitimi")
+    
+    if st.button("Modeli Eğit (Random Forest)"):
+        try:
+            from sklearn.model_selection import train_test_split
+            from sklearn.ensemble import RandomForestClassifier
+            from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+            import seaborn as sns
+
+            # Train/Test Ayrımı (%80 Eğitim, %20 Test)
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+            
+            # Modeli Kur
+            clf = RandomForestClassifier(n_estimators=100, random_state=42)
+            
+            with st.spinner("Model eğitiliyor..."):
+                clf.fit(X_train, y_train)
+                
+            # Tahmin Yap
+            y_pred = clf.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            
+            st.success(f"Model Eğitildi! Başarı Oranı (Accuracy): **%{acc*100:.2f}**")
+            
+            # 3. Sonuçların Görselleştirilmesi
+            st.write("### 3. Model Performansı ve Analiz")
+            
+            tab1, tab2, tab3 = st.tabs(["Karmaşıklık Matrisi (Confusion Matrix)", "Özellik Önemi (Feature Importance)", "Sınıflandırma Raporu"])
+            
+            with tab1:
+                st.write("Modelin hangi hastalıkları birbiriyle karıştırdığını gösterir.")
+                fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
+                # Benzersiz sınıfları al
+                unique_labels = sorted(list(set(y_test) | set(y_pred)))
+                cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
+                
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_labels, yticklabels=unique_labels, ax=ax_cm)
+                plt.ylabel('Gerçek Tanı')
+                plt.xlabel('Modelin Tahmini')
+                plt.xticks(rotation=90)
+                st.pyplot(fig_cm)
+                
+            with tab2:
+                st.write("Modelin karar verirken hangi kan değerine ne kadar önem verdiğini gösterir.")
+                importances = clf.feature_importances_
+                feature_names = X.columns
+                forest_importances = pd.Series(importances, index=feature_names).sort_values(ascending=False)
+                
+                fig_imp, ax_imp = plt.subplots(figsize=(10, 6))
+                forest_importances.head(15).plot.bar(ax=ax_imp)
+                ax_imp.set_title("En Önemli 15 Özellik")
+                ax_imp.set_ylabel("Önem Skoru")
+                st.pyplot(fig_imp)
+                
+            with tab3:
+                report_dict = classification_report(y_test, y_pred, output_dict=True)
+                st.dataframe(pd.DataFrame(report_dict).transpose())
+
+        except ImportError:
+            st.error("ML kütüphaneleri eksik. Lütfen terminalde `pip install scikit-learn seaborn` komutunu çalıştırın.")
+        except Exception as e:
+            st.error(f"Model eğitimi sırasında hata: {e}")
+            # Hata ayıklama için detay:
+            # st.write(e)

@@ -1961,179 +1961,199 @@ else:
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
 
 # ================================================================================= #
-#                         🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ                           #
+#                         🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (GELİŞMİŞ)                #
 # ================================================================================= #
 st.divider()
-st.header("🤖 Yapay Zeka (ML) Model Eğitimi ve Analizi")
-st.caption("Mevcut etiketlenmiş veriyi kullanarak bir Sınıflandırma Modeli (Random Forest) eğitir ve performansını gösterir.")
+st.header("🤖 Yapay Zeka (ML) Laboratuvarı")
+st.caption("Farklı algoritmalar ve parametre kombinasyonları ile tanı modelinizi eğitin.")
 
-# ML için kullanılacak özelliklerin (Feature) listesi
-# Bu isimler Excel'deki TETKIK_ISMI ile BİREBİR aynı olmalıdır.
-ML_FEATURES = [
-    "Hemogram/HGB", "Hemogram/RBC", "Hemogram/MCV", "Hemogram/MCH", "Hemogram/RDW", # Hemogram
-    "HbA2 (%)", "A2/", # A2 (İki ihtimali de arayacağız)
-    "HbF (%)", "F/",   # F
-    "HbS (%)", "S/",   # S
-    "HbC (%)", "C/",   # C
-    "HbD (%)", "D/",   # D
-    "HbA", "HbA (%)"   # A
-]
+# --- ML Modülünü Aktif Et ---
+if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
+    
+    # 1. Parametre Listelerini Tanımla
+    HEMO_PARAMS = ["Hemogram/HGB", "Hemogram/RBC", "Hemogram/MCV", "Hemogram/MCH", "Hemogram/RDW", "Hemogram/PLT", "Hemogram/WBC"]
+    HPLC_PARAMS = ["HbA2 (%)", "A2/", "HbF (%)", "F/", "HbS (%)", "S/", "HbC (%)", "C/", "HbD (%)", "D/", "HbA", "HbA (%)"]
+    OTHER_PARAMS = ["YAS"] # Varsa Cinsiyet de eklenebilir (0/1 kodlanarak)
+    
+    ALL_AVAILABLE_PARAMS = HEMO_PARAMS + HPLC_PARAMS + OTHER_PARAMS
 
-# ML Başlatma Butonu
-if st.checkbox("Yapay Zeka Modülünü Aktif Et", value=False):
+    # 2. Kullanıcı Arayüzü (Sol: Ayarlar, Sağ: Sonuçlar)
+    col_ml_settings, col_ml_main = st.columns([1, 2])
     
-    # 1. Veri Hazırlığı (Long -> Wide Format Dönüşümü)
-    st.write("### 1. Veri Hazırlığı")
-    
-    # Etiketlenmiş veriyi al
-    if "VARIANT_TAG" not in work.columns:
-        st.error("Önce yukarıdaki analizlerin tamamlanması ve VARIANT_TAG oluşması gerekir.")
-        st.stop()
+    with col_ml_settings:
+        st.subheader("⚙️ Model Ayarları")
         
-    labeled_data = work[work["VARIANT_TAG"].notna()].copy()
-    
-    if labeled_data.empty:
-        st.warning("Etiketlenmiş veri bulunamadı.")
-        st.stop()
-
-    with st.spinner("Veri ML formatına dönüştürülüyor (Pivotlama)..."):
-        # Sadece sayısal değeri olan ve ML_FEATURES listesindeki testleri al
-        ml_subset = labeled_data[
-            labeled_data["TETKIK_ISMI"].isin(ML_FEATURES) & 
-            labeled_data["__VAL_NUM__"].notna()
-        ].copy()
-        
-        # PIVOTLAMA: Satırlar=Protokol, Sütunlar=Tetkik, Değerler=Sonuç
-        X = ml_subset.pivot_table(
-            index="PROTOKOL_NO", 
-            columns="TETKIK_ISMI", 
-            values="__VAL_NUM__"
+        # A) Algoritma Seçimi
+        algo_choice = st.radio(
+            "Algoritma Seçin:",
+            ["Random Forest (Dengeli)", "XGBoost (Hızlı & Güçlü)", "LightGBM (Büyük Veri)", "CatBoost (Kategorik Kralı)"],
+            index=0
         )
         
-        # Sütun isimlerini sadeleştirme (Aynı testin farklı isimlerini birleştirme)
-        # Örn: Hem 'A2/' hem 'HbA2 (%)' varsa bunları tek sütuna indirmeliyiz.
-        # Şimdilik basitçe NaN'ları 0 ile doldurup devam edeceğiz.
+        st.divider()
         
-        # Eksik Veri Yönetimi (Imputation)
-        # HPLC verileri (A2, F, S, C...) eksikse 0 kabul edilebilir.
-        # Hemogram verileri (MCV, HGB) eksikse o satırı atmak veya ortalama vermek gerekir.
-        # Basitlik için: Hepsini 0 ile dolduralım (HPLC mantığına uygun)
-        X = X.fillna(0)
+        # B) Parametre Seçimi (Presetler)
+        st.write("**Hangi verilerle tahmin yapılsın?**")
+        feature_mode = st.radio(
+            "Parametre Grubu:",
+            ["Tümü (Hemogram + HPLC + Yaş)", "Sadece Hemogram", "Sadece HPLC", "Özel Seçim"],
+            index=0
+        )
         
-        # Hedef Değişkeni (y) Al: VARIANT_TAG
-        # Her protokolün etiketini ana tablodan çek
-        y_map = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["VARIANT_TAG"]
+        # Seçime göre aktif özellikleri belirle
+        if feature_mode == "Tümü (Hemogram + HPLC + Yaş)":
+            selected_features = ALL_AVAILABLE_PARAMS
+        elif feature_mode == "Sadece Hemogram":
+            selected_features = HEMO_PARAMS
+        elif feature_mode == "Sadece HPLC":
+            selected_features = HPLC_PARAMS
+        else: # Özel Seçim
+            selected_features = st.multiselect("Parametreleri İşaretleyin:", ALL_AVAILABLE_PARAMS, default=ALL_AVAILABLE_PARAMS)
+            
+        st.info(f"Seçili Parametre Sayısı: {len(selected_features)}")
         
-        # X ve y'yi eşleştir (Sadece her ikisi de olan protokoller)
-        common_indices = X.index.intersection(y_map.index)
-        X = X.loc[common_indices]
-        y = y_map.loc[common_indices]
-        
-        st.success(f"Veri Hazır: {X.shape[0]} Hasta, {X.shape[1]} Özellik (Parametre) kullanılarak model eğitilecek.")
-        
-        # Veri Önizleme
-        with st.expander("Eğitim Verisini Gör (X ve y)"):
-            st.dataframe(X.head())
-            st.write("**Hedef Sınıflar (y):**")
-            st.write(y.value_counts())
+        # C) Başlat Butonu
+        start_training = st.button("🚀 Modeli Eğit ve Test Et", type="primary", use_container_width=True)
 
-    # 2. Model Eğitimi
-    st.write("### 2. Model Eğitimi")
-    
-    if st.button("Modeli Eğit (Random Forest)"):
-        try:
-            # Gerekli kütüphaneleri burada import et
-            from sklearn.model_selection import train_test_split
-            from sklearn.ensemble import RandomForestClassifier
-            from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-            import seaborn as sns
+    # 3. Eğitim ve Analiz Süreci
+    with col_ml_main:
+        if start_training:
+            if not selected_features:
+                st.error("Lütfen en az bir parametre seçin.")
+            elif "VARIANT_TAG" not in work.columns:
+                st.error("Lütfen önce yukarıdaki analizlerin tamamlanmasını bekleyin.")
+            else:
+                # --- VERİ HAZIRLIĞI ---
+                labeled_data = work[work["VARIANT_TAG"].notna()].copy()
+                
+                if labeled_data.empty:
+                    st.error("Etiketlenmiş veri yok.")
+                else:
+                    try:
+                        # Kütüphaneleri Yükle
+                        from sklearn.model_selection import train_test_split
+                        from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+                        from sklearn.preprocessing import LabelEncoder
+                        import seaborn as sns
+                        
+                        # Algoritmaları Yükle (Hata yönetimi ile)
+                        models = {}
+                        try: from sklearn.ensemble import RandomForestClassifier; models["RF"] = RandomForestClassifier
+                        except: pass
+                        try: from xgboost import XGBClassifier; models["XGB"] = XGBClassifier
+                        except: pass
+                        try: from lightgbm import LGBMClassifier; models["LGBM"] = LGBMClassifier
+                        except: pass
+                        try: from catboost import CatBoostClassifier; models["CAT"] = CatBoostClassifier
+                        except: pass
 
-            # --- YENİ: YETERSİZ VERİ FİLTRESİ (1 Tane Olanları At) ---
-            # Her bir tanıdan kaç tane var sayalım
-            class_counts = y.value_counts()
-            
-            # Sayısı 2'den az (yani 1) olan tanıları bul
-            rare_classes = class_counts[class_counts < 2].index.tolist()
-            
-            if len(rare_classes) > 0:
-                st.warning(f"⚠️ **Veri Temizliği:** Aşağıdaki tanılar veri setinde sadece 1 kez bulunduğu için model eğitiminden ÇIKARILDI (Modelin hata vermemesi için): \n\n {', '.join(rare_classes)}")
-                
-                # Bu sınıfları veriden (X ve y) filtrele
-                valid_classes = class_counts[class_counts >= 2].index
-                filter_mask = y.isin(valid_classes)
-                
-                X = X[filter_mask]
-                y = y[filter_mask]
-            
-            # Eğer tüm veri silindiyse (Çok nadir bir durum) durdur
-            if len(y) == 0:
-                st.error("Eğitim için yeterli veri kalmadı.")
-                st.stop()
+                        with st.spinner("Veri hazırlanıyor ve pivotlanıyor..."):
+                            # Sadece seçili özellikleri al
+                            ml_subset = labeled_data[
+                                labeled_data["TETKIK_ISMI"].isin(selected_features) & 
+                                labeled_data["__VAL_NUM__"].notna()
+                            ].copy()
+                            
+                            # Pivot
+                            X = ml_subset.pivot_table(index="PROTOKOL_NO", columns="TETKIK_ISMI", values="__VAL_NUM__")
+                            
+                            # YAŞ Ekle (Eğer seçiliyse)
+                            if "YAS" in selected_features and "YAS" in work.columns:
+                                age_series = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["YAS"]
+                                X = X.join(age_series, how="left")
+                            
+                            X = X.fillna(0) # Eksikleri 0 yap
+                            
+                            # Hedef (y)
+                            y_raw = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["VARIANT_TAG"]
+                            
+                            # Eşleştirme
+                            common = X.index.intersection(y_raw.index)
+                            X = X.loc[common]
+                            y_raw = y_raw.loc[common]
+                            
+                            # Yetersiz Sınıfları Temizle (<2 örnek)
+                            vc = y_raw.value_counts()
+                            valid_classes = vc[vc >= 2].index
+                            if len(vc[vc < 2]) > 0:
+                                st.warning(f"⚠️ Şu tanılar eğitimden çıkarıldı (Yetersiz veri): {list(vc[vc < 2].index)}")
+                            
+                            X = X[y_raw.isin(valid_classes)]
+                            y_raw = y_raw[y_raw.isin(valid_classes)]
+                            
+                            # LABEL ENCODING (XGBoost/LightGBM için şart)
+                            le = LabelEncoder()
+                            y = le.fit_transform(y_raw)
+                            class_names = le.classes_
 
-            # --- EĞİTİM (ARTIK GÜVENLİ) ---
-            # Artık her sınıftan en az 2 tane olduğu kesin, stratify=y güvenle kullanılabilir
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, 
-                test_size=0.2, 
-                random_state=42, 
-                stratify=y 
-            )
-            
-            # Modeli Kur (100 ağaçlı orman)
-            clf = RandomForestClassifier(n_estimators=100, random_state=42)
-            
-            with st.spinner("Model eğitiliyor..."):
-                clf.fit(X_train, y_train)
-                
-            # Tahmin Yap
-            y_pred = clf.predict(X_test)
-            acc = accuracy_score(y_test, y_pred)
-            
-            st.success(f"Model Eğitildi! Başarı Oranı (Accuracy): **%{acc*100:.2f}**")
-            
-            if acc > 0.98:
-                st.balloons()
-                st.info("Mükemmel bir sonuç! Kural tabanlı etiketleriniz ile Yapay Zeka'nın bulguları neredeyse birebir örtüşüyor.")
-            
-            # 3. Sonuçların Görselleştirilmesi
-            st.write("### 3. Model Performansı ve Analiz")
-            
-            tab1, tab2, tab3 = st.tabs(["Özellik Önemi (Feature Importance)", "Karmaşıklık Matrisi", "Sınıflandırma Raporu"])
-            
-            with tab1:
-                st.write("**Model karar verirken hangi parametreye en çok baktı?**")
-                importances = clf.feature_importances_
-                feature_names = X.columns
-                forest_importances = pd.Series(importances, index=feature_names).sort_values(ascending=False)
-                
-                fig_imp, ax_imp = plt.subplots(figsize=(10, 6))
-                # İlk 15 özelliği göster
-                forest_importances.head(15).plot.bar(ax=ax_imp, color="skyblue")
-                ax_imp.set_title("En Önemli 15 Özellik")
-                ax_imp.set_ylabel("Önem Skoru")
-                st.pyplot(fig_imp)
-                st.caption("Bu grafik, yapay zekanın tanıyı koyarken en çok hangi laboratuvar değerine güvendiğini gösterir.")
-                
-            with tab2:
-                st.write("**Modelin tahminleri ile gerçek etiketler arasındaki uyum:**")
-                # Sadece test setinde veya tahminde geçen etiketleri al
-                unique_labels = sorted(list(set(y_test) | set(y_pred)))
-                
-                fig_cm, ax_cm = plt.subplots(figsize=(12, 8))
-                cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
-                
-                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_labels, yticklabels=unique_labels, ax=ax_cm)
-                plt.ylabel('Gerçek Tanı (Sizin Kuralınız)')
-                plt.xlabel('Modelin Tahmini (Yapay Zeka)')
-                plt.xticks(rotation=90)
-                st.pyplot(fig_cm)
-                
-            with tab3:
-                # Zero division hatasını önlemek için
-                report_dict = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-                st.dataframe(pd.DataFrame(report_dict).transpose())
+                            # Sütun İsimlerini Temizle (LightGBM hatası için)
+                            # Türkçe karakterleri, boşlukları ve sembolleri temizle
+                            clean_cols = [re.sub(r'[^A-Za-z0-9_]', '', c) for c in X.columns]
+                            X.columns = clean_cols
+                        
+                        # --- MODEL EĞİTİMİ ---
+                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+                        
+                        clf = None
+                        model_name = ""
+                        
+                        if "Random Forest" in algo_choice:
+                            clf = models["RF"](n_estimators=100, random_state=42)
+                            model_name = "Random Forest"
+                        elif "XGBoost" in algo_choice:
+                            if "XGB" not in models: st.error("XGBoost kütüphanesi eksik!"); st.stop()
+                            clf = models["XGB"](use_label_encoder=False, eval_metric='mlogloss', random_state=42)
+                            model_name = "XGBoost"
+                        elif "LightGBM" in algo_choice:
+                            if "LGBM" not in models: st.error("LightGBM kütüphanesi eksik!"); st.stop()
+                            clf = models["LGBM"](random_state=42, verbose=-1)
+                            model_name = "LightGBM"
+                        elif "CatBoost" in algo_choice:
+                            if "CAT" not in models: st.error("CatBoost kütüphanesi eksik!"); st.stop()
+                            clf = models["CAT"](verbose=0, random_state=42)
+                            model_name = "CatBoost"
 
-        except Exception as e:
-            st.error(f"Model eğitimi sırasında hata: {e}")
-            # Hata ayıklama için detay:
-            # st.write(e)
+                        with st.spinner(f"{model_name} modeli eğitiliyor..."):
+                            clf.fit(X_train, y_train)
+                            y_pred = clf.predict(X_test)
+                            acc = accuracy_score(y_test, y_pred)
+                        
+                        # --- SONUÇ EKRANI ---
+                        st.success(f"✅ **{model_name}** Başarı Oranı: **%{acc*100:.2f}**")
+                        
+                        # Sekmeler
+                        tab_imp, tab_cm, tab_rep = st.tabs(["📊 Özellik Önemi", "🎯 Karmaşıklık Matrisi", "📝 Detaylı Rapor"])
+                        
+                        with tab_imp:
+                            try:
+                                importances = clf.feature_importances_
+                                feature_imp = pd.Series(importances, index=X.columns).sort_values(ascending=False)
+                                
+                                fig_imp, ax_imp = plt.subplots(figsize=(8, 5))
+                                feature_imp.head(10).plot.bar(ax=ax_imp, color="#87CEEB")
+                                ax_imp.set_title(f"{model_name} İçin En Önemli 10 Parametre")
+                                st.pyplot(fig_imp)
+                                st.info("Bu grafik, modelin tanı koyarken en çok hangi veriye güvendiğini gösterir.")
+                            except:
+                                st.warning("Bu model için özellik önemi çizilemedi.")
+
+                        with tab_cm:
+                            fig_cm, ax_cm = plt.subplots(figsize=(10, 6))
+                            # Etiketleri sayıdan tekrar isme çevir
+                            unique_indices = sorted(list(set(y_test) | set(y_pred)))
+                            unique_names = [class_names[i] for i in unique_indices]
+                            
+                            cm = confusion_matrix(y_test, y_pred, labels=unique_indices)
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_names, yticklabels=unique_names, ax=ax_cm)
+                            plt.ylabel('Gerçek Tanı')
+                            plt.xlabel('Modelin Tahmini')
+                            plt.xticks(rotation=45, ha='right')
+                            st.pyplot(fig_cm)
+
+                        with tab_rep:
+                            report = classification_report(y_test, y_pred, target_names=class_names, output_dict=True, zero_division=0)
+                            st.dataframe(pd.DataFrame(report).transpose())
+
+                    except Exception as e:
+                        st.error(f"Hata oluştu: {e}")
+                        st.info("İpucu: Gerekli kütüphanelerin (`xgboost`, `lightgbm`, `catboost`) kurulu olduğundan emin olun.")

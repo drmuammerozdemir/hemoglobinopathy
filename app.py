@@ -611,13 +611,16 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     # --- YENİ KURAL 1d: BETA TALASEMİ INTERMEDIA / MAJOR ŞÜPHESİ ---
     # Kriter: Mikrositoz VAR ve HbF Çok Yüksek (> %10)
     # (Not: S-Beta yukarıda elendiği için buraya sadece Beta türevleri gelir)
-    if has_micro_hypo and hbf_val > 10.0:
-         # A2 de yüksekse klasik Beta Intermedia/Major tablosudur
+    if hbf_val > 10.0:
          if hba2_val > 3.5:
-             tags.append("B-thal Intermedia/Major? (High A2/F)")
+             tags.append("B-thal Intermedia (High A2/High F)")
          else:
-             # A2 normalse (Nadir) ama F çok yüksekse ve hasta mikrositikse
-             tags.append("B-thal Intermedia/Major? (High F)")
+             tags.append("B-thal Intermedia (High F only)")
+    
+    # SENARYO B: Sınırda İntermedia (Orta F + Ciddi Anemi + Mikrositoz)
+    # HbF %5-10 arası ama hasta ciddi anemik (Hb < 9) ve mikrositik ise -> İntermedia lehine
+    elif (hbf_val >= 5.0 and hbf_val <= 10.0) and (hgb_val < 9.0) and has_micro_hypo:
+        tags.append("B-thal Intermedia? (Mod. F + Severe Anemia)")
         
     if (hbs_val > 0) and (hbc_val > 0) and (not hba_present):
         tags.append("Hb S/C or S/O-Arab?") 
@@ -677,8 +680,9 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "Hb S/C or S/O-Arab?", 
         
         # YENİ: Intermedia/Major'ları en üste, S-Beta'nın altına ekledik
-        "B-thal Intermedia/Major? (High A2/F)",
-        "B-thal Intermedia/Major? (High F)",
+        "B-thal Intermedia (High A2/High F)",
+        "B-thal Intermedia (High F only)",
+        "B-thal Intermedia? (Mod. F + Severe Anemia)",
         
         "δβ-thal Trait",
         "Hb S-β-thal",

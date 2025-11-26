@@ -1961,7 +1961,7 @@ else:
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
 
 # ================================================================================= #
-#                         🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (GELİŞMİŞ)                #
+#                         🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (DÜZELTİLMİŞ)             #
 # ================================================================================= #
 st.divider()
 st.header("🤖 Yapay Zeka (ML) Laboratuvarı")
@@ -1970,14 +1970,34 @@ st.caption("Farklı algoritmalar ve parametre kombinasyonları ile tanı modelin
 # --- ML Modülünü Aktif Et ---
 if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
     
-    # 1. Parametre Listelerini Tanımla
-    HEMO_PARAMS = ["Hemogram/HGB", "Hemogram/RBC", "Hemogram/MCV", "Hemogram/MCH", "Hemogram/RDW", "Hemogram/PLT", "Hemogram/WBC"]
-    HPLC_PARAMS = ["HbA2 (%)", "A2/", "HbF (%)", "F/", "HbS (%)", "S/", "HbC (%)", "C/", "HbD (%)", "D/", "HbA", "HbA (%)"]
-    OTHER_PARAMS = ["YAS"] # Varsa Cinsiyet de eklenebilir (0/1 kodlanarak)
+    # 1. GENİŞLETİLMİŞ PARAMETRE LİSTESİ
+    HEMO_PARAMS = [
+        "Hemogram/HGB", "Hemogram/RBC", "Hemogram/MCV", "Hemogram/MCH", "Hemogram/MCHC",
+        "Hemogram/RDW", "Hemogram/RDW-SD", 
+        "Hemogram/HCT", "Hemogram/PLT", "Hemogram/WBC", "Hemogram/MPV", "Hemogram/PCT", "Hemogram/PDW",
+        "Hemogram/NEU", "Hemogram/NEU%", "Hemogram/LYM", "Hemogram/LYM%",
+        "Hemogram/MONO", "Hemogram/MONO%", "Hemogram/EOS", "Hemogram/EOS%",
+        "Hemogram/BASO", "Hemogram/BASO%"
+    ]
     
-    ALL_AVAILABLE_PARAMS = HEMO_PARAMS + HPLC_PARAMS + OTHER_PARAMS
+    HPLC_PARAMS = [
+        "HbA2 (%)", "A2/", 
+        "HbF (%)", "F/", 
+        "HbS (%)", "S/", 
+        "HbC (%)", "C/", 
+        "HbD (%)", "D/", 
+        "HbE (%)", "E/",
+        
+        # --- DÜZELTME BURADA: HbA için doğru isim eklendi ---
+        "Talasemi(HPLC) (A0)/", "HbA", "HbA (%)" 
+    ]
+    
+    # Yaş ve Cinsiyet (Otomatik işlenecek)
+    OTHER_PARAMS = ["YAS", "CINSIYET"] 
+    
+    ALL_AVAILABLE_PARAMS = HEMO_PARAMS + HPLC_PARAMS
 
-    # 2. Kullanıcı Arayüzü (Sol: Ayarlar, Sağ: Sonuçlar)
+    # 2. Kullanıcı Arayüzü
     col_ml_settings, col_ml_main = st.columns([1, 2])
     
     with col_ml_settings:
@@ -1987,27 +2007,26 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         algo_choice = st.radio(
             "Algoritma Seçin:",
             ["Random Forest (Dengeli)", "XGBoost (Hızlı & Güçlü)", "LightGBM (Büyük Veri)", "CatBoost (Kategorik Kralı)"],
-            index=0
+            index=1 # XGBoost varsayılan
         )
         
         st.divider()
         
-        # B) Parametre Seçimi (Presetler)
+        # B) Parametre Seçimi
         st.write("**Hangi verilerle tahmin yapılsın?**")
         feature_mode = st.radio(
             "Parametre Grubu:",
-            ["Tümü (Hemogram + HPLC + Yaş)", "Sadece Hemogram", "Sadece HPLC", "Özel Seçim"],
+            ["Tümü (Full Hemogram + HPLC + Yaş/Cinsiyet)", "Sadece Hemogram", "Sadece HPLC", "Özel Seçim"],
             index=0
         )
         
-        # Seçime göre aktif özellikleri belirle
-        if feature_mode == "Tümü (Hemogram + HPLC + Yaş)":
+        if feature_mode == "Tümü (Full Hemogram + HPLC + Yaş/Cinsiyet)":
             selected_features = ALL_AVAILABLE_PARAMS
         elif feature_mode == "Sadece Hemogram":
             selected_features = HEMO_PARAMS
         elif feature_mode == "Sadece HPLC":
             selected_features = HPLC_PARAMS
-        else: # Özel Seçim
+        else:
             selected_features = st.multiselect("Parametreleri İşaretleyin:", ALL_AVAILABLE_PARAMS, default=ALL_AVAILABLE_PARAMS)
             
         st.info(f"Seçili Parametre Sayısı: {len(selected_features)}")
@@ -2036,7 +2055,7 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                         from sklearn.preprocessing import LabelEncoder
                         import seaborn as sns
                         
-                        # Algoritmaları Yükle (Hata yönetimi ile)
+                        # Algoritmalar
                         models = {}
                         try: from sklearn.ensemble import RandomForestClassifier; models["RF"] = RandomForestClassifier
                         except: pass
@@ -2047,22 +2066,30 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                         try: from catboost import CatBoostClassifier; models["CAT"] = CatBoostClassifier
                         except: pass
 
-                        with st.spinner("Veri hazırlanıyor ve pivotlanıyor..."):
-                            # Sadece seçili özellikleri al
+                        with st.spinner("Veri hazırlanıyor..."):
+                            # 1. Pivotlama (Uzun -> Geniş)
                             ml_subset = labeled_data[
                                 labeled_data["TETKIK_ISMI"].isin(selected_features) & 
                                 labeled_data["__VAL_NUM__"].notna()
                             ].copy()
                             
-                            # Pivot
                             X = ml_subset.pivot_table(index="PROTOKOL_NO", columns="TETKIK_ISMI", values="__VAL_NUM__")
                             
-                            # YAŞ Ekle (Eğer seçiliyse)
-                            if "YAS" in selected_features and "YAS" in work.columns:
+                            # 2. YAŞ Ekleme
+                            if "YAS" in work.columns:
                                 age_series = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["YAS"]
                                 X = X.join(age_series, how="left")
-                            
-                            X = X.fillna(0) # Eksikleri 0 yap
+                                X["YAS"] = X["YAS"].fillna(0)
+
+                            # 3. CİNSİYET Ekleme (0/1 Dönüşümü)
+                            if "CINSIYET" in work.columns:
+                                sex_series = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["CINSIYET"]
+                                # K/F -> 0, E/M -> 1
+                                sex_series = sex_series.astype(str).map(lambda x: 1 if x.lower().startswith(('e','m')) else 0)
+                                X["CINSIYET_CODE"] = sex_series
+
+                            # Eksikleri 0 ile doldur
+                            X = X.fillna(0)
                             
                             # Hedef (y)
                             y_raw = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["VARIANT_TAG"]
@@ -2076,22 +2103,22 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                             vc = y_raw.value_counts()
                             valid_classes = vc[vc >= 2].index
                             if len(vc[vc < 2]) > 0:
-                                st.warning(f"⚠️ Şu tanılar eğitimden çıkarıldı (Yetersiz veri): {list(vc[vc < 2].index)}")
+                                st.warning(f"⚠️ Şu nadir tanılar (<2 hasta) eğitimden çıkarıldı: {list(vc[vc < 2].index)}")
                             
                             X = X[y_raw.isin(valid_classes)]
                             y_raw = y_raw[y_raw.isin(valid_classes)]
                             
-                            # LABEL ENCODING (XGBoost/LightGBM için şart)
+                            # Label Encoding
                             le = LabelEncoder()
                             y = le.fit_transform(y_raw)
                             class_names = le.classes_
 
-                            # Sütun İsimlerini Temizle (LightGBM hatası için)
-                            # Türkçe karakterleri, boşlukları ve sembolleri temizle
-                            clean_cols = [re.sub(r'[^A-Za-z0-9_]', '', c) for c in X.columns]
+                            # Sütun İsimlerini Temizle
+                            clean_cols = [re.sub(r'[^A-Za-z0-9_]', '', str(c)) for c in X.columns]
                             X.columns = clean_cols
                         
                         # --- MODEL EĞİTİMİ ---
+                        # Stratify kullanarak veriyi dengeli böl
                         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
                         
                         clf = None
@@ -2101,15 +2128,15 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                             clf = models["RF"](n_estimators=100, random_state=42)
                             model_name = "Random Forest"
                         elif "XGBoost" in algo_choice:
-                            if "XGB" not in models: st.error("XGBoost kütüphanesi eksik!"); st.stop()
+                            if "XGB" not in models: st.error("XGBoost eksik!"); st.stop()
                             clf = models["XGB"](use_label_encoder=False, eval_metric='mlogloss', random_state=42)
                             model_name = "XGBoost"
                         elif "LightGBM" in algo_choice:
-                            if "LGBM" not in models: st.error("LightGBM kütüphanesi eksik!"); st.stop()
+                            if "LGBM" not in models: st.error("LightGBM eksik!"); st.stop()
                             clf = models["LGBM"](random_state=42, verbose=-1)
                             model_name = "LightGBM"
                         elif "CatBoost" in algo_choice:
-                            if "CAT" not in models: st.error("CatBoost kütüphanesi eksik!"); st.stop()
+                            if "CAT" not in models: st.error("CatBoost eksik!"); st.stop()
                             clf = models["CAT"](verbose=0, random_state=42)
                             model_name = "CatBoost"
 
@@ -2121,7 +2148,6 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                         # --- SONUÇ EKRANI ---
                         st.success(f"✅ **{model_name}** Başarı Oranı: **%{acc*100:.2f}**")
                         
-                        # Sekmeler
                         tab_imp, tab_cm, tab_rep = st.tabs(["📊 Özellik Önemi", "🎯 Karmaşıklık Matrisi", "📝 Detaylı Rapor"])
                         
                         with tab_imp:
@@ -2129,17 +2155,16 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                                 importances = clf.feature_importances_
                                 feature_imp = pd.Series(importances, index=X.columns).sort_values(ascending=False)
                                 
-                                fig_imp, ax_imp = plt.subplots(figsize=(8, 5))
-                                feature_imp.head(10).plot.bar(ax=ax_imp, color="#87CEEB")
-                                ax_imp.set_title(f"{model_name} İçin En Önemli 10 Parametre")
+                                fig_imp, ax_imp = plt.subplots(figsize=(10, 8))
+                                feature_imp.head(20).plot.bar(ax=ax_imp, color="#87CEEB")
+                                ax_imp.set_title(f"{model_name} İçin En Önemli 20 Parametre")
+                                plt.xticks(rotation=45, ha='right')
                                 st.pyplot(fig_imp)
-                                st.info("Bu grafik, modelin tanı koyarken en çok hangi veriye güvendiğini gösterir.")
                             except:
                                 st.warning("Bu model için özellik önemi çizilemedi.")
 
                         with tab_cm:
-                            fig_cm, ax_cm = plt.subplots(figsize=(10, 6))
-                            # Etiketleri sayıdan tekrar isme çevir
+                            fig_cm, ax_cm = plt.subplots(figsize=(12, 8))
                             unique_indices = sorted(list(set(y_test) | set(y_pred)))
                             unique_names = [class_names[i] for i in unique_indices]
                             
@@ -2147,7 +2172,7 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_names, yticklabels=unique_names, ax=ax_cm)
                             plt.ylabel('Gerçek Tanı')
                             plt.xlabel('Modelin Tahmini')
-                            plt.xticks(rotation=45, ha='right')
+                            plt.xticks(rotation=90)
                             st.pyplot(fig_cm)
 
                         with tab_rep:
@@ -2156,4 +2181,4 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
 
                     except Exception as e:
                         st.error(f"Hata oluştu: {e}")
-                        st.info("İpucu: Gerekli kütüphanelerin (`xgboost`, `lightgbm`, `catboost`) kurulu olduğundan emin olun.")
+                        st.info("Gerekli kütüphanelerin (xgboost, lightgbm, catboost) kurulu olduğundan emin olun.")

@@ -1960,20 +1960,6 @@ else:
     st.info("Listede grafiklenecek varyant grubu (A2, Borderline, Intermedia, Delta-Beta) verisi bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
 
-Bu hataların hepsi teknik ve haklı sebeplerden kaynaklanıyor. Özellikle **`Hemogram/BASO`** ve **`Hemogram/BASO%`** parametreleri, özel karakterleri (`/` ve `%`) temizlediğimizde ikisi de **`HemogramBASO`** ismine dönüşüyor ve **"Duplicate Feature" (Mükerrer Sütun)** hatası veriyor.
-
-Ayrıca **"Kalan %20'yi nasıl göreceğiz?"** sorunuz çok önemli. Modelin o ayırdığı %20'lik test grubu üzerindeki gerçek tahminlerini (Hasta X için "Taşıyıcı" dedi ama aslında "Normal" miydi?) listelemeniz gerekiyor.
-
-**Çözümler:**
-
-1.  **İsim Çakışması Çözümü:** Sütun isimlerini temizlerken `%` işaretini silmek yerine `Pct` kelimesine dönüştürdüm. (`BASO%` -\> `BASOPct`).
-2.  **Sınıf Sayısı Hatası Çözümü:** Sınıflandırma raporunu oluştururken, sadece *test setinde var olan* sınıfları dinamik olarak eşleştiren bir yapı kurdum.
-3.  **XGBoost `dtype` Hatası:** Tüm veriyi zorla `float` (ondalıklı sayı) tipine çevirerek veri tipi uyumsuzluğunu giderdim.
-4.  **YENİ TAB:** **"Tahmin Sonuçları (Test Seti)"** adında 4. bir sekme ekledim. Burada o %20'lik kısmın Protokol numarasını, Gerçek Tanısını, YZ Tahminini ve YZ'nin ne kadar emin olduğunu (Olasılık) göreceksiniz.
-
-Lütfen `app.py` dosyanızdaki **"🤖 Yapay Zeka (ML) Laboratuvarı"** bölümünü (en alt kısım) **tamamen silin** ve bu **düzeltilmiş ve geliştirilmiş** versiyonu yapıştırın.
-
-```python
 # ================================================================================= #
 #             🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (HATA DÜZELTMELİ + TAHMİN LİSTESİ)    #
 # ================================================================================= #

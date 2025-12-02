@@ -2238,4 +2238,3 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                     except Exception as e:
                         st.error(f"Hata oluştu: {e}")
                         st.info("Hata Detayı: Veri tipleri veya sütun isimleri uyumsuz olabilir.")
-```

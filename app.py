@@ -1961,11 +1961,11 @@ else:
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
 
 # ================================================================================= #
-#             🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (HATA DÜZELTMELİ + TAHMİN LİSTESİ)    #
+#             🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (HEDEF SEÇİMİ + GÜVEN SKORU)          #
 # ================================================================================= #
 st.divider()
 st.header("🤖 Yapay Zeka (ML) Laboratuvarı")
-st.caption("Farklı algoritmalar ve parametre kombinasyonları ile tanı modelinizi eğitin ve test sonuçlarını inceleyin.")
+st.caption("Modelin girdilerini (Parametreler) ve çıktılarını (Hastalık Tanıları) seçerek özelleştirilmiş eğitim yapın.")
 
 # --- ML Modülünü Aktif Et ---
 if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
@@ -1990,9 +1990,7 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         "Talasemi(HPLC) (A0)/", "HbA", "HbA (%)"
     ]
     
-    # Yaş ve Cinsiyet
     OTHER_PARAMS = ["YAS", "CINSIYET"] 
-    
     ALL_AVAILABLE_PARAMS = HEMO_PARAMS + HPLC_PARAMS
 
     # 2. Kullanıcı Arayüzü
@@ -2005,13 +2003,13 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         algo_choice = st.radio(
             "Algoritma Seçin:",
             ["Random Forest", "XGBoost", "LightGBM", "CatBoost"],
-            index=1 # XGBoost varsayılan
+            index=1
         )
         
         st.divider()
         
-        # B) Parametre Seçimi
-        st.write("**Hangi verilerle tahmin yapılsın?**")
+        # B) Parametre Seçimi (GİRDİLER / X)
+        st.write("**1. GİRDİLER: Hangi verilerle tahmin yapılsın?**")
         feature_mode = st.radio(
             "Parametre Grubu:",
             ["Tümü (Full Hemogram + HPLC + Yaş/Cinsiyet)", "Sadece Hemogram", "Sadece HPLC", "Özel Seçim"],
@@ -2027,9 +2025,30 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         else:
             selected_features = st.multiselect("Parametreleri İşaretleyin:", ALL_AVAILABLE_PARAMS, default=ALL_AVAILABLE_PARAMS)
             
-        st.info(f"Seçili Parametre Sayısı: {len(selected_features)}")
+        st.divider()
+
+        # C) Hedef Seçimi (ÇIKTILAR / y) -- YENİ ÖZELLİK --
+        st.write("**2. ÇIKTILAR: Hangi tanıları tahmin edeyim?**")
         
-        # C) Başlat Butonu
+        # Mevcut tüm etiketleri bul
+        if "VARIANT_TAG" in work.columns:
+            available_targets = sorted(work["VARIANT_TAG"].dropna().unique().tolist())
+            
+            # Varsayılan olarak hepsini seç, ama kullanıcı çıkarabilir
+            selected_targets = st.multiselect(
+                "Tahmin Edilecek Hastalık Gruplarını Seçin:",
+                options=available_targets,
+                default=available_targets,
+                help="Listeden çıkardığınız hastalık grubuna sahip hastalar, model eğitimine ve testine DAHİL EDİLMEYECEKTİR."
+            )
+            
+            st.caption(f"Seçili Gruplar: {len(selected_targets)} / {len(available_targets)}")
+        else:
+            st.error("Önce yukarıdaki analizlerin tamamlanması gerekir.")
+            selected_targets = []
+        
+        st.divider()
+        # D) Başlat Butonu
         start_training = st.button("🚀 Modeli Eğit ve Test Et", type="primary", use_container_width=True)
 
     # 3. Eğitim ve Analiz Süreci
@@ -2037,14 +2056,19 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         if start_training:
             if not selected_features:
                 st.error("Lütfen en az bir parametre seçin.")
+            elif not selected_targets:
+                st.error("Lütfen en az bir hastalık grubu seçin.")
+            elif len(selected_targets) < 2:
+                st.error("Sınıflandırma yapabilmek için en az 2 farklı grup seçmelisiniz.")
             elif "VARIANT_TAG" not in work.columns:
-                st.error("Lütfen önce yukarıdaki analizlerin tamamlanmasını bekleyin.")
+                st.error("Veri hazırlanmamış.")
             else:
                 # --- VERİ HAZIRLIĞI ---
-                labeled_data = work[work["VARIANT_TAG"].notna()].copy()
+                # Sadece seçili hedef gruplara (selected_targets) ait satırları al
+                labeled_data = work[work["VARIANT_TAG"].isin(selected_targets)].copy()
                 
                 if labeled_data.empty:
-                    st.error("Etiketlenmiş veri yok.")
+                    st.error("Seçilen filtrelere uygun veri kalmadı.")
                 else:
                     try:
                         # Kütüphaneler
@@ -2065,7 +2089,7 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                         except: pass
 
                         if algo_choice not in models:
-                            st.error(f"{algo_choice} kütüphanesi yüklü değil. Lütfen pip install ile yükleyin.")
+                            st.error(f"{algo_choice} kütüphanesi yüklü değil.")
                             st.stop()
 
                         with st.spinner("Veri hazırlanıyor..."):
@@ -2091,17 +2115,12 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
 
                             # Eksikleri 0 ile doldur
                             X = X.fillna(0)
-                            
-                            # --- DÜZELTME: VERİ TİPİ ZORLAMA ---
-                            # XGBoost 'object' tipini sevmez, hepsini float yapalım
                             X = X.astype(float)
                             
-                            # --- DÜZELTME: SÜTUN İSİMLERİ (DUPLICATE ÖNLEME) ---
-                            # BASO ve BASO% çakışmasını önlemek için '%' -> 'Pct' yapıyoruz
+                            # Sütun İsimlerini Temizle
                             new_cols = []
                             for col in X.columns:
                                 clean_col = str(col).replace("%", "Pct").replace("/", "_").replace(" ", "_").replace("-", "_")
-                                # Sadece alfanümerik karakterler kalsın
                                 clean_col = re.sub(r'[^A-Za-z0-9_]', '', clean_col)
                                 new_cols.append(clean_col)
                             X.columns = new_cols
@@ -2132,11 +2151,9 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
                         
                         clf = None
-                        
                         if algo_choice == "Random Forest":
                             clf = models[algo_choice](n_estimators=100, random_state=42)
                         elif algo_choice == "XGBoost":
-                            # Düzeltme: use_label_encoder deprecated oldu, kaldırdık
                             clf = models[algo_choice](eval_metric='mlogloss', random_state=42)
                         elif algo_choice == "LightGBM":
                             clf = models[algo_choice](random_state=42, verbose=-1)
@@ -2146,6 +2163,7 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                         with st.spinner(f"{algo_choice} modeli eğitiliyor..."):
                             clf.fit(X_train, y_train)
                             y_pred = clf.predict(X_test)
+                            
                             # Olasılıkları al (Güven Skoru için)
                             try:
                                 y_proba = clf.predict_proba(X_test)
@@ -2163,54 +2181,40 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                             "📊 Özellik Önemi", 
                             "🎯 Karmaşıklık Matrisi", 
                             "📝 Detaylı Rapor",
-                            "🔍 Tahmin Sonuçları (Test Seti)" # YENİ SEKME
+                            "🔍 Tahmin Sonuçları (Güven Skoru)"
                         ])
                         
                         with tab_imp:
                             try:
                                 importances = clf.feature_importances_
                                 feature_imp = pd.Series(importances, index=X.columns).sort_values(ascending=False)
-                                
                                 fig_imp, ax_imp = plt.subplots(figsize=(10, 8))
                                 feature_imp.head(20).plot.bar(ax=ax_imp, color="#87CEEB")
                                 ax_imp.set_title(f"{algo_choice} İçin En Önemli 20 Parametre")
                                 plt.xticks(rotation=45, ha='right')
                                 st.pyplot(fig_imp)
-                            except:
-                                st.warning("Bu model için özellik önemi çizilemedi.")
+                            except: st.warning("Çizilemedi.")
 
                         with tab_cm:
-                            # --- DÜZELTME: SADECE MEVCUT SINIFLARI GÖSTER ---
                             unique_indices = sorted(list(set(y_test) | set(y_pred)))
                             unique_names_present = [class_names[i] for i in unique_indices]
-                            
                             fig_cm, ax_cm = plt.subplots(figsize=(12, 8))
                             cm = confusion_matrix(y_test, y_pred, labels=unique_indices)
                             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                                        xticklabels=unique_names_present, 
-                                        yticklabels=unique_names_present, ax=ax_cm)
+                                        xticklabels=unique_names_present, yticklabels=unique_names_present, ax=ax_cm)
                             plt.ylabel('Gerçek Tanı')
                             plt.xlabel('Modelin Tahmini')
                             plt.xticks(rotation=90)
                             st.pyplot(fig_cm)
 
                         with tab_rep:
-                            # --- DÜZELTME: TARGET NAMES UYUMSUZLUĞU GİDERİLDİ ---
-                            report = classification_report(
-                                y_test, 
-                                y_pred, 
-                                labels=unique_indices,
-                                target_names=unique_names_present, 
-                                output_dict=True, 
-                                zero_division=0
-                            )
+                            report = classification_report(y_test, y_pred, labels=unique_indices, target_names=unique_names_present, output_dict=True, zero_division=0)
                             st.dataframe(pd.DataFrame(report).transpose())
                             
                         with tab_pred:
-                            # --- YENİ: TEST SETİ TAHMİN LİSTESİ ---
-                            st.write(f"Test seti olarak ayrılan **{len(y_test)}** hastanın gerçek ve tahmin edilen tanıları:")
+                            # --- GÜVEN SKORU ANALİZİ (GÜNCELLENDİ) ---
+                            st.markdown("### 🎯 Güven Skoru ve Klinik Güvenilirlik Analizi")
                             
-                            # DataFrame oluştur
                             pred_df = pd.DataFrame({
                                 "Protokol No": X_test.index,
                                 "Gerçek Tanı": [class_names[i] for i in y_test],
@@ -2218,19 +2222,45 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                                 "Güven Skoru (%)": confidence
                             })
                             
-                            # Hatalı tahminleri işaretle
                             pred_df["Durum"] = np.where(pred_df["Gerçek Tanı"] == pred_df["YZ Tahmini"], "✅ Doğru", "❌ Hatalı")
                             
-                            # Önce hatalıları göster (analiz için)
-                            pred_df = pred_df.sort_values("Durum", ascending=True)
+                            # --- İSTATİSTİK HESAPLAMA ---
+                            threshold = 90.0 # %90 ve üzeri güven
                             
-                            st.dataframe(
-                                pred_df.style.apply(
-                                    lambda x: ['background-color: #ffcccc' if x['Durum'] == '❌ Hatalı' else '' for i in x], 
-                                    axis=1
-                                ), 
-                                use_container_width=True
-                            )
+                            # 1. Yüksek Güvenli Hastalar
+                            high_conf_df = pred_df[pred_df["Güven Skoru (%)"] >= threshold]
+                            n_high = len(high_conf_df)
+                            n_total_test = len(pred_df)
+                            ratio_high = (n_high / n_total_test) * 100 if n_total_test > 0 else 0
+                            
+                            # 2. Bu gruptaki Doğruluk (Accuracy)
+                            if n_high > 0:
+                                n_correct_high = len(high_conf_df[high_conf_df["Durum"] == "✅ Doğru"])
+                                acc_high = (n_correct_high / n_high) * 100
+                            else:
+                                acc_high = 0
+                                
+                            # 3. Kalan %20'lik dilim (Test Seti) için Genel Doğruluk
+                            general_accuracy = acc * 100
+
+                            # --- METRİKLERİ GÖSTER ---
+                            m1, m2, m3, m4 = st.columns(4)
+                            m1.metric(label="Toplam Test Edilen Hasta", value=n_total_test)
+                            m2.metric(label="Genel Doğruluk (Tüm Test Seti)", value=f"%{general_accuracy:.2f}")
+                            m3.metric(label=f"Yüksek Güvenli (>%{threshold})", value=f"{n_high} kişi", delta=f"%{ratio_high:.1f} Kapsama")
+                            m4.metric(label="Yüksek Güvenli Grubun Doğruluğu", value=f"%{acc_high:.2f}", help="Modelin '%90'dan fazla eminim' dediği vakalardaki başarısı.")
+                            
+                            st.success(f"""
+                            **📝 Makale İçin Bulgular Cümlesi:**
+                            
+                            "Geliştirilen yapay zeka modeli, test setindeki vakaların **%{ratio_high:.1f}**'ini (n={n_high}) **%{threshold}** ve üzeri bir güven skoru (confidence score) ile sınıflandırmıştır. 
+                            Modelin kendinden emin olduğu bu yüksek güvenli grupta, tanısal doğruluk oranı (accuracy) **%{acc_high:.2f}** olarak tespit edilmiştir. Tüm test seti üzerindeki genel doğruluk oranı ise **%{general_accuracy:.2f}**'dir."
+                            """)
+                            
+                            st.divider()
+                            st.write("#### Detaylı Hasta Listesi")
+                            pred_df = pred_df.sort_values("Durum", ascending=True)
+                            st.dataframe(pred_df.style.apply(lambda x: ['background-color: #ffcccc' if x['Durum'] == '❌ Hatalı' else '' for i in x], axis=1), use_container_width=True)
                             
                             csv_pred = pred_df.to_csv(index=False).encode("utf-8-sig")
                             st.download_button("⬇️ Tahmin Sonuçlarını İndir (CSV)", csv_pred, "yz_tahmin_sonuclari.csv", "text/csv")

@@ -1960,12 +1960,26 @@ else:
     st.info("Listede grafiklenecek varyant grubu (A2, Borderline, Intermedia, Delta-Beta) verisi bulunamadı.")
 st.caption("Not: Kan Grubu ve Anormal Hb analizleri normalize edilerek hesaplanır; ham yazımlar ayrıca CSV olarak indirilebilir.")
 
+Bu hataların hepsi teknik ve haklı sebeplerden kaynaklanıyor. Özellikle **`Hemogram/BASO`** ve **`Hemogram/BASO%`** parametreleri, özel karakterleri (`/` ve `%`) temizlediğimizde ikisi de **`HemogramBASO`** ismine dönüşüyor ve **"Duplicate Feature" (Mükerrer Sütun)** hatası veriyor.
+
+Ayrıca **"Kalan %20'yi nasıl göreceğiz?"** sorunuz çok önemli. Modelin o ayırdığı %20'lik test grubu üzerindeki gerçek tahminlerini (Hasta X için "Taşıyıcı" dedi ama aslında "Normal" miydi?) listelemeniz gerekiyor.
+
+**Çözümler:**
+
+1.  **İsim Çakışması Çözümü:** Sütun isimlerini temizlerken `%` işaretini silmek yerine `Pct` kelimesine dönüştürdüm. (`BASO%` -\> `BASOPct`).
+2.  **Sınıf Sayısı Hatası Çözümü:** Sınıflandırma raporunu oluştururken, sadece *test setinde var olan* sınıfları dinamik olarak eşleştiren bir yapı kurdum.
+3.  **XGBoost `dtype` Hatası:** Tüm veriyi zorla `float` (ondalıklı sayı) tipine çevirerek veri tipi uyumsuzluğunu giderdim.
+4.  **YENİ TAB:** **"Tahmin Sonuçları (Test Seti)"** adında 4. bir sekme ekledim. Burada o %20'lik kısmın Protokol numarasını, Gerçek Tanısını, YZ Tahminini ve YZ'nin ne kadar emin olduğunu (Olasılık) göreceksiniz.
+
+Lütfen `app.py` dosyanızdaki **"🤖 Yapay Zeka (ML) Laboratuvarı"** bölümünü (en alt kısım) **tamamen silin** ve bu **düzeltilmiş ve geliştirilmiş** versiyonu yapıştırın.
+
+```python
 # ================================================================================= #
-#                         🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (DÜZELTİLMİŞ)             #
+#             🤖 MAKİNE ÖĞRENMESİ (ML) MODÜLÜ (HATA DÜZELTMELİ + TAHMİN LİSTESİ)    #
 # ================================================================================= #
 st.divider()
 st.header("🤖 Yapay Zeka (ML) Laboratuvarı")
-st.caption("Farklı algoritmalar ve parametre kombinasyonları ile tanı modelinizi eğitin.")
+st.caption("Farklı algoritmalar ve parametre kombinasyonları ile tanı modelinizi eğitin ve test sonuçlarını inceleyin.")
 
 # --- ML Modülünü Aktif Et ---
 if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
@@ -1987,12 +2001,10 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         "HbC (%)", "C/", 
         "HbD (%)", "D/", 
         "HbE (%)", "E/",
-        
-        # --- DÜZELTME BURADA: HbA için doğru isim eklendi ---
-        "Talasemi(HPLC) (A0)/", "HbA", "HbA (%)" 
+        "Talasemi(HPLC) (A0)/", "HbA", "HbA (%)"
     ]
     
-    # Yaş ve Cinsiyet (Otomatik işlenecek)
+    # Yaş ve Cinsiyet
     OTHER_PARAMS = ["YAS", "CINSIYET"] 
     
     ALL_AVAILABLE_PARAMS = HEMO_PARAMS + HPLC_PARAMS
@@ -2006,7 +2018,7 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
         # A) Algoritma Seçimi
         algo_choice = st.radio(
             "Algoritma Seçin:",
-            ["Random Forest (Dengeli)", "XGBoost (Hızlı & Güçlü)", "LightGBM (Büyük Veri)", "CatBoost (Kategorik Kralı)"],
+            ["Random Forest", "XGBoost", "LightGBM", "CatBoost"],
             index=1 # XGBoost varsayılan
         )
         
@@ -2049,22 +2061,26 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                     st.error("Etiketlenmiş veri yok.")
                 else:
                     try:
-                        # Kütüphaneleri Yükle
+                        # Kütüphaneler
                         from sklearn.model_selection import train_test_split
                         from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
                         from sklearn.preprocessing import LabelEncoder
                         import seaborn as sns
                         
-                        # Algoritmalar
+                        # Algoritma Yükleyicileri
                         models = {}
-                        try: from sklearn.ensemble import RandomForestClassifier; models["RF"] = RandomForestClassifier
+                        try: from sklearn.ensemble import RandomForestClassifier; models["Random Forest"] = RandomForestClassifier
                         except: pass
-                        try: from xgboost import XGBClassifier; models["XGB"] = XGBClassifier
+                        try: from xgboost import XGBClassifier; models["XGBoost"] = XGBClassifier
                         except: pass
-                        try: from lightgbm import LGBMClassifier; models["LGBM"] = LGBMClassifier
+                        try: from lightgbm import LGBMClassifier; models["LightGBM"] = LGBMClassifier
                         except: pass
-                        try: from catboost import CatBoostClassifier; models["CAT"] = CatBoostClassifier
+                        try: from catboost import CatBoostClassifier; models["CatBoost"] = CatBoostClassifier
                         except: pass
+
+                        if algo_choice not in models:
+                            st.error(f"{algo_choice} kütüphanesi yüklü değil. Lütfen pip install ile yükleyin.")
+                            st.stop()
 
                         with st.spinner("Veri hazırlanıyor..."):
                             # 1. Pivotlama (Uzun -> Geniş)
@@ -2084,13 +2100,26 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                             # 3. CİNSİYET Ekleme (0/1 Dönüşümü)
                             if "CINSIYET" in work.columns:
                                 sex_series = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["CINSIYET"]
-                                # K/F -> 0, E/M -> 1
                                 sex_series = sex_series.astype(str).map(lambda x: 1 if x.lower().startswith(('e','m')) else 0)
                                 X["CINSIYET_CODE"] = sex_series
 
                             # Eksikleri 0 ile doldur
                             X = X.fillna(0)
                             
+                            # --- DÜZELTME: VERİ TİPİ ZORLAMA ---
+                            # XGBoost 'object' tipini sevmez, hepsini float yapalım
+                            X = X.astype(float)
+                            
+                            # --- DÜZELTME: SÜTUN İSİMLERİ (DUPLICATE ÖNLEME) ---
+                            # BASO ve BASO% çakışmasını önlemek için '%' -> 'Pct' yapıyoruz
+                            new_cols = []
+                            for col in X.columns:
+                                clean_col = str(col).replace("%", "Pct").replace("/", "_").replace(" ", "_").replace("-", "_")
+                                # Sadece alfanümerik karakterler kalsın
+                                clean_col = re.sub(r'[^A-Za-z0-9_]', '', clean_col)
+                                new_cols.append(clean_col)
+                            X.columns = new_cols
+
                             # Hedef (y)
                             y_raw = labeled_data.drop_duplicates("PROTOKOL_NO").set_index("PROTOKOL_NO")["VARIANT_TAG"]
                             
@@ -2112,43 +2141,44 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                             le = LabelEncoder()
                             y = le.fit_transform(y_raw)
                             class_names = le.classes_
-
-                            # Sütun İsimlerini Temizle
-                            clean_cols = [re.sub(r'[^A-Za-z0-9_]', '', str(c)) for c in X.columns]
-                            X.columns = clean_cols
                         
                         # --- MODEL EĞİTİMİ ---
-                        # Stratify kullanarak veriyi dengeli böl
                         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
                         
                         clf = None
-                        model_name = ""
                         
-                        if "Random Forest" in algo_choice:
-                            clf = models["RF"](n_estimators=100, random_state=42)
-                            model_name = "Random Forest"
-                        elif "XGBoost" in algo_choice:
-                            if "XGB" not in models: st.error("XGBoost eksik!"); st.stop()
-                            clf = models["XGB"](use_label_encoder=False, eval_metric='mlogloss', random_state=42)
-                            model_name = "XGBoost"
-                        elif "LightGBM" in algo_choice:
-                            if "LGBM" not in models: st.error("LightGBM eksik!"); st.stop()
-                            clf = models["LGBM"](random_state=42, verbose=-1)
-                            model_name = "LightGBM"
-                        elif "CatBoost" in algo_choice:
-                            if "CAT" not in models: st.error("CatBoost eksik!"); st.stop()
-                            clf = models["CAT"](verbose=0, random_state=42)
-                            model_name = "CatBoost"
+                        if algo_choice == "Random Forest":
+                            clf = models[algo_choice](n_estimators=100, random_state=42)
+                        elif algo_choice == "XGBoost":
+                            # Düzeltme: use_label_encoder deprecated oldu, kaldırdık
+                            clf = models[algo_choice](eval_metric='mlogloss', random_state=42)
+                        elif algo_choice == "LightGBM":
+                            clf = models[algo_choice](random_state=42, verbose=-1)
+                        elif algo_choice == "CatBoost":
+                            clf = models[algo_choice](verbose=0, random_state=42)
 
-                        with st.spinner(f"{model_name} modeli eğitiliyor..."):
+                        with st.spinner(f"{algo_choice} modeli eğitiliyor..."):
                             clf.fit(X_train, y_train)
                             y_pred = clf.predict(X_test)
+                            # Olasılıkları al (Güven Skoru için)
+                            try:
+                                y_proba = clf.predict_proba(X_test)
+                                confidence = np.max(y_proba, axis=1) * 100
+                            except:
+                                confidence = [0] * len(y_pred)
+
                             acc = accuracy_score(y_test, y_pred)
                         
                         # --- SONUÇ EKRANI ---
-                        st.success(f"✅ **{model_name}** Başarı Oranı: **%{acc*100:.2f}**")
+                        st.success(f"✅ **{algo_choice}** Başarı Oranı: **%{acc*100:.2f}**")
                         
-                        tab_imp, tab_cm, tab_rep = st.tabs(["📊 Özellik Önemi", "🎯 Karmaşıklık Matrisi", "📝 Detaylı Rapor"])
+                        # Sekmeler
+                        tab_imp, tab_cm, tab_rep, tab_pred = st.tabs([
+                            "📊 Özellik Önemi", 
+                            "🎯 Karmaşıklık Matrisi", 
+                            "📝 Detaylı Rapor",
+                            "🔍 Tahmin Sonuçları (Test Seti)" # YENİ SEKME
+                        ])
                         
                         with tab_imp:
                             try:
@@ -2157,28 +2187,69 @@ if st.checkbox("Yapay Zeka Laboratuvarını Aç", value=False):
                                 
                                 fig_imp, ax_imp = plt.subplots(figsize=(10, 8))
                                 feature_imp.head(20).plot.bar(ax=ax_imp, color="#87CEEB")
-                                ax_imp.set_title(f"{model_name} İçin En Önemli 20 Parametre")
+                                ax_imp.set_title(f"{algo_choice} İçin En Önemli 20 Parametre")
                                 plt.xticks(rotation=45, ha='right')
                                 st.pyplot(fig_imp)
                             except:
                                 st.warning("Bu model için özellik önemi çizilemedi.")
 
                         with tab_cm:
-                            fig_cm, ax_cm = plt.subplots(figsize=(12, 8))
+                            # --- DÜZELTME: SADECE MEVCUT SINIFLARI GÖSTER ---
                             unique_indices = sorted(list(set(y_test) | set(y_pred)))
-                            unique_names = [class_names[i] for i in unique_indices]
+                            unique_names_present = [class_names[i] for i in unique_indices]
                             
+                            fig_cm, ax_cm = plt.subplots(figsize=(12, 8))
                             cm = confusion_matrix(y_test, y_pred, labels=unique_indices)
-                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=unique_names, yticklabels=unique_names, ax=ax_cm)
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                                        xticklabels=unique_names_present, 
+                                        yticklabels=unique_names_present, ax=ax_cm)
                             plt.ylabel('Gerçek Tanı')
                             plt.xlabel('Modelin Tahmini')
                             plt.xticks(rotation=90)
                             st.pyplot(fig_cm)
 
                         with tab_rep:
-                            report = classification_report(y_test, y_pred, target_names=class_names, output_dict=True, zero_division=0)
+                            # --- DÜZELTME: TARGET NAMES UYUMSUZLUĞU GİDERİLDİ ---
+                            report = classification_report(
+                                y_test, 
+                                y_pred, 
+                                labels=unique_indices,
+                                target_names=unique_names_present, 
+                                output_dict=True, 
+                                zero_division=0
+                            )
                             st.dataframe(pd.DataFrame(report).transpose())
+                            
+                        with tab_pred:
+                            # --- YENİ: TEST SETİ TAHMİN LİSTESİ ---
+                            st.write(f"Test seti olarak ayrılan **{len(y_test)}** hastanın gerçek ve tahmin edilen tanıları:")
+                            
+                            # DataFrame oluştur
+                            pred_df = pd.DataFrame({
+                                "Protokol No": X_test.index,
+                                "Gerçek Tanı": [class_names[i] for i in y_test],
+                                "YZ Tahmini": [class_names[i] for i in y_pred],
+                                "Güven Skoru (%)": confidence
+                            })
+                            
+                            # Hatalı tahminleri işaretle
+                            pred_df["Durum"] = np.where(pred_df["Gerçek Tanı"] == pred_df["YZ Tahmini"], "✅ Doğru", "❌ Hatalı")
+                            
+                            # Önce hatalıları göster (analiz için)
+                            pred_df = pred_df.sort_values("Durum", ascending=True)
+                            
+                            st.dataframe(
+                                pred_df.style.apply(
+                                    lambda x: ['background-color: #ffcccc' if x['Durum'] == '❌ Hatalı' else '' for i in x], 
+                                    axis=1
+                                ), 
+                                use_container_width=True
+                            )
+                            
+                            csv_pred = pred_df.to_csv(index=False).encode("utf-8-sig")
+                            st.download_button("⬇️ Tahmin Sonuçlarını İndir (CSV)", csv_pred, "yz_tahmin_sonuclari.csv", "text/csv")
 
                     except Exception as e:
                         st.error(f"Hata oluştu: {e}")
-                        st.info("Gerekli kütüphanelerin (xgboost, lightgbm, catboost) kurulu olduğundan emin olun.")
+                        st.info("Hata Detayı: Veri tipleri veya sütun isimleri uyumsuz olabilir.")
+```

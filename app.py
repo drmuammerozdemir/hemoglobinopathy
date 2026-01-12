@@ -24,12 +24,42 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import psutil
 from scipy import stats
 from concurrent.futures import ThreadPoolExecutor
 
+
 # ============== Ayarlar ============== #
 st.set_page_config(page_title="Tetkik Analiz — Optimize", layout="wide")
+# ============== SİSTEM İZLEME ============== #
+def sistem_durumu():
+    # RAM Kullanımı
+    mem = psutil.virtual_memory()
+    ram_kullanilan = mem.used / (1024 ** 3) # GB cinsinden
+    ram_toplam = mem.total / (1024 ** 3)
+    ram_yuzde = mem.percent
 
+    # CPU Kullanımı
+    cpu_yuzde = psutil.cpu_percent(interval=1) # 1 saniye ölçüm yapar
+
+    return ram_kullanilan, ram_toplam, ram_yuzde, cpu_yuzde
+
+with st.sidebar:
+    st.divider()
+    st.markdown("### 🖥️ Sistem Durumu")
+    if st.checkbox("Canlı İzle", value=False):
+        # Anlık değerleri al
+        r_used, r_total, r_perc, c_perc = sistem_durumu()
+        
+        st.metric("CPU Kullanımı", f"%{c_perc}")
+        st.metric("RAM Kullanımı", f"{r_used:.1f} / {r_total:.1f} GB", f"%{r_perc}")
+        
+        if r_perc > 90:
+            st.error("⚠️ RAM Dolmak Üzere!")
+        elif c_perc > 90:
+            st.warning("🔥 İşlemci Tam Yükte!")
+    st.divider()
+    
 REQ_COLS = ["PROTOKOL_NO", "TCKIMLIK_NO", "TETKIK_ISMI", "TEST_DEGERI", "CINSIYET", "YAS"]
 
 # Kategorik (metin) testler

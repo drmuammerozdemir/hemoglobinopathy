@@ -631,10 +631,17 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     
     tags = [] 
 
-    # --- Kural 1: Kompleks Varyantlar ---
+ # --- Kural 1: Kompleks Varyantlar (S-Beta Talasemi) ---
+    # Bu blok A2 YÜKSEKLİĞİNE baktığı için S-Beta'ları yakalar
     if has_micro_hypo and hba2_val > 3.5 and hbs_val > 50:
         if hba_present: tags.append("Hb S-β+ thal")
         else: tags.append("Hb S-β0 thal")
+        
+    # --- Kural 2: Orak Hücre Anemisi (HbSS) ---
+    # HbA2 NORMAL (veya düşük), HbS ÇOK YÜKSEK
+    # Limiti 50 yerine 75 yapmak daha güvenlidir, çünkü SS hastaları genelde %85-95 S olur.
+    elif hbs_val > 75 and hba2_val <= 3.5: 
+        tags.append("Sickle Cell Anemia (HbSS)")
     
     if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")

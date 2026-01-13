@@ -679,7 +679,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     if hba2_val > 3.5 and has_micro_hypo:
         tags.append("HbA2↑ (B-thal Trait)")
         
-    NORMOSİTİK A2 YÜKSEKLİĞİ (Maskelenmiş?)
+    # NORMOSİTİK A2 YÜKSEKLİĞİ (Maskelenmiş?)
     # Şart: A2 > 3.5 ama MCV Normal. 
     # (B12 eksikliği ile maskelenmiş talasemi veya hipertiroidi olabilir)
     elif hba2_val > 3.5 and not has_micro_hypo:

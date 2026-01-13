@@ -631,19 +631,23 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     
     tags = [] 
 
- # --- Kural 1: Kompleks Varyantlar (S-Beta Talasemi) ---
-    # Bu blok A2 YÜKSEKLİĞİNE baktığı için S-Beta'ları yakalar
+# --- 1. S-Beta Talasemi (Yüksek A2 + Yüksek S + Mikrositoz) ---
     if has_micro_hypo and hba2_val > 3.5 and hbs_val > 50:
         if hba_present: tags.append("Hb S-β+ thal")
         else: tags.append("Hb S-β0 thal")
-        
-    # --- Kural 2: Orak Hücre Anemisi (HbSS) ---
-    # HbA2 NORMAL (veya düşük), HbS ÇOK YÜKSEK
-    # Limiti 50 yerine 75 yapmak daha güvenlidir, çünkü SS hastaları genelde %85-95 S olur.
-    elif hbs_val > 75 and hba2_val <= 3.5: 
+
+    # --- 2. Orak Hücre Anemisi (HbSS) ---
+    # HbS > 75 ve HbA2 Normal ise
+    elif hbs_val > 75 and hba2_val <= 3.5:
         tags.append("Sickle Cell Anemia (HbSS)")
-        else:
-            tags.append("HbS Trait (Orak Hücre Taşıyıcısı)")
+
+    # --- 3. Orak Hücre Taşıyıcısı (HbAS) ---
+    # Sadece ELSE yazarsan %1'lik gürültüyü de taşıyıcı yapar.
+    # Bu yüzden buraya %10 alt sınırını koyuyoruz.
+    elif hbs_val >= 10:
+        tags.append("HbS Trait (Orak Hücre Taşıyıcısı)")
+        
+    # Not: hbs_val < 10 ise hiçbir şeye girmez (Normal kabul edilir), doğrusu budur.
     
     if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")

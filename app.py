@@ -642,7 +642,8 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     # Limiti 50 yerine 75 yapmak daha güvenlidir, çünkü SS hastaları genelde %85-95 S olur.
     elif hbs_val > 75 and hba2_val <= 3.5: 
         tags.append("Sickle Cell Anemia (HbSS)")
-        else: tags.append("HbS Trait (Orak Hücre Taşıyıcısı)")
+        else:
+            tags.append("HbS Trait (Orak Hücre Taşıyıcısı)")
     
     if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")

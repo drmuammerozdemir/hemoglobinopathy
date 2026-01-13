@@ -676,7 +676,14 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
 
     # --- Kural 3: Basit Kantitatif ---
     # A) Klasik A2 Taşıyıcı (> 3.5)
-    if hba2_val > 3.5: tags.append("HbA2↑ (B-thal Trait)")
+    if hba2_val > 3.5 and has_micro_hypo:
+        tags.append("HbA2↑ (B-thal Trait)")
+        
+    NORMOSİTİK A2 YÜKSEKLİĞİ (Maskelenmiş?)
+    # Şart: A2 > 3.5 ama MCV Normal. 
+    # (B12 eksikliği ile maskelenmiş talasemi veya hipertiroidi olabilir)
+    elif hba2_val > 3.5 and not has_micro_hypo:
+        tags.append("HbA2↑ (Normocytic / Masked?)")
     
     # B) Borderline (3.3 - 3.8 arası)
     # A2 3.3-3.8 arası

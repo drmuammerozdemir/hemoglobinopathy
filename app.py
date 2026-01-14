@@ -753,152 +753,121 @@ if "VARIANT_TAG" not in work.columns:
                    .reset_index())
     work = work.merge(var_map, on="PROTOKOL_NO", how="left")
 
-# ================= VARYANT ÖZETİ (etiketleme ve istatistik) ================= #
+# ================= VARYANT ÖZETİ (etiketleme ve istatistik) - REVİZE EDİLDİ ================= #
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
                    .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
                    .reset_index())
     work = work.merge(var_map, on="PROTOKOL_NO", how="left")
 
-st.header("📋 Varyant Özeti — erişkin eşikleri ile")
+st.header("📋 Varyant Özeti — Çoklu Grup & Akıllı İstatistik")
+st.caption("Birden fazla varyant grubunu seçerek (örn. Mikrositik ve Normositik A2) kombine istatistik görebilirsiniz. Dağılım normalliğine göre (Shapiro-Wilk) format otomatik belirlenir.")
 
 # Mevcut varyantları bul
 present_tags = sorted([t for t in work["VARIANT_TAG"].dropna().unique()])
 
-# --- YENİ: "TOPLAM BETA GRUBU" TANIMI ---
-# Bu liste, toplamak istediğiniz 4 ana grubu içerir
-BETA_CARRIER_GROUP = [
-    "HbA2↑ (B-thal Trait)", # 1. Klasik
-    "Borderline HbA2",      # 2. Sınırda
-    "δβ-thal Trait",        # 3. Yüksek F'li Taşıyıcı
-    "Hb S-β0 thal",         # 4a. S-Beta
-    "Hb S-β+ thal"          # 4b. S-Beta
-    "HbF↑"                  # 5. HbF↑
-]
+# --- 1. ÇOKLU SEÇİM KUTUSU (MULTIPLE SELECT) ---
+# Varsayılan olarak tüm etiketler seçili gelir, isterseniz çıkarabilirsiniz.
+selected_tags = st.multiselect(
+    "Analiz edilecek grupları seçin (Çoklu seçim):",
+    options=present_tags,
+    default=present_tags, 
+    help="İstediğiniz grupları ekleyip çıkararak özel bir havuz oluşturabilirsiniz."
+)
 
-# Dropdown seçeneklerini oluştur
-custom_options = ["(Tümü)", ">> TOPLAM BETA TAŞIYICI GRUBU (Kombine) <<"] + present_tags
-variant_choice = st.selectbox("Varyant seç:", custom_options, index=0)
-
-# --- FİLTRELEME MANTIĞI ---
-base_v = work.copy()
-
-if variant_choice == "(Tümü)":
-    # Hepsini göster, filtreleme yapma
-    pass
-elif variant_choice == ">> TOPLAM BETA TAŞIYICI GRUBU (Kombine) <<":
-    # Sadece o 4 özel grubu filtrele
-    base_v = base_v[base_v["VARIANT_TAG"].isin(BETA_CARRIER_GROUP)]
-    st.info(f"Bu grup şu varyantların toplamından oluşmaktadır: {', '.join(BETA_CARRIER_GROUP)}")
+# --- 2. VERİ FİLTRELEME ---
+if not selected_tags:
+    st.warning("Lütfen en az bir grup seçin.")
+    base_v = pd.DataFrame()
 else:
-    # Tek bir varyant seçildiyse sadece onu filtrele
-    base_v = base_v[base_v["VARIANT_TAG"] == variant_choice]
+    # Sadece seçilen etiketlere sahip hastaları al
+    base_v = work[work["VARIANT_TAG"].isin(selected_tags)].copy()
 
+if not base_v.empty:
 
-# 1) Frekans Tablosu (Seçime Göre)
-freq = (base_v["VARIANT_TAG"].value_counts(dropna=True)
-        .rename_axis("Varyant").to_frame("N").reset_index())
-total = int(freq["N"].sum()) if not freq.empty else 0
-if total > 0: freq["%"] = (freq["N"]/total*100).round(2)
-
-if variant_choice == "(Tümü)":
-    st.subheader("Tüm Varyantların Frekansı")
-    st.dataframe(freq, use_container_width=True)
-    st.download_button("⬇️ Varyant frekansları (CSV)",
-                      data=freq.to_csv(index=False).encode("utf-8-sig"),
-                      file_name="varyant_frekans.csv", mime="text/csv")
-else:
-    # Kombine veya tekil seçim yapıldığında da frekansları gösterelim
-    st.write(f"**Seçilen Gruptaki Dağılım (Toplam n={total}):**")
-    st.dataframe(freq, use_container_width=True)
-
-
-# 2) Seçilen varyant için ♀/♂ İstatistik Tablosu (Seçmeli Format & Sayılar)
-
-# --- Yardımcı Format Fonksiyonları ---
-def fmt(val):
-    if pd.isna(val): return "—"
-    s = f"{val:.2f}"
-    if s.endswith(".00"): return s[:-3]
-    return s
-
-def _mean_sd(s: pd.Series):
-    s = pd.to_numeric(s, errors="coerce").dropna()
-    if s.empty: return "—"
-    mean = s.mean()
-    std = s.std(ddof=1)
-    if pd.isna(std) or std == 0: return fmt(mean)
-    return f"{fmt(mean)} ± {fmt(std)}"
-
-def _median_min_max(s: pd.Series):
-    s = pd.to_numeric(s, errors="coerce").dropna()
-    if s.empty: return "—"
-    med = s.median()
-    min_v = s.min()
-    max_v = s.max()
-    return f"{fmt(med)} [{fmt(min_v)}–{fmt(max_v)}]"
-
-table_fm = pd.DataFrame()
-if variant_choice != "(Tümü)":
+    # --- 3. FREKANS TABLOSU (Seçilenler İçin) ---
+    freq = (base_v["VARIANT_TAG"].value_counts(dropna=True)
+            .rename_axis("Varyant Grubu").to_frame("N").reset_index())
     
-    # --- YENİ: BAŞLIK İÇİN HASTA SAYISINI HESAPLA ---
-    # base_v 'long format' olduğu için (her test bir satır), benzersiz hasta sayısını bulmalıyız
-    unique_pats_stats = base_v[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
-    unique_pats_stats['Gender_Clean'] = unique_pats_stats['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+    total_n_selected = int(freq["N"].sum())
+    if total_n_selected > 0:
+        freq["% (Seçim)"] = (freq["N"] / total_n_selected * 100).round(2)
     
-    n_stat_total = len(unique_pats_stats)
-    n_stat_fem = len(unique_pats_stats[unique_pats_stats['Gender_Clean'] == 'Kadın'])
-    n_stat_male = len(unique_pats_stats[unique_pats_stats['Gender_Clean'] == 'Erkek'])
-    
-    # Başlık Metni
-    header_text = f"♀/♂ İstatistikler (Total: {n_stat_total}) [F: {n_stat_fem}, M: {n_stat_male}]"
+    # Frekansları göster
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.metric("Seçilen Havuz Toplamı", f"{total_n_selected} Hasta")
+    with c2:
+        with st.expander("Grup Dağılımını Göster", expanded=False):
+            st.dataframe(freq, use_container_width=True)
+            st.download_button("⬇️ Frekansları İndir (CSV)",
+                               data=freq.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="secili_varyant_frekans.csv", mime="text/csv")
 
-    st.divider()
-    
-    # --- Format Seçici ve Başlık ---
-    col_head, col_opt = st.columns([2, 2])
-    with col_head:
-        st.subheader(header_text)
-    with col_opt:
-        stat_mode = st.radio(
-            "Tablo Formatı:",
-            ["Ortalama ± Standart Sapma (Mean ± SD)", "Ortanca [Min - Max] (Median [Min-Max])"],
-            index=0,
-            horizontal=True,
-            key="variant_summary_stat_mode",
-            label_visibility="collapsed"
-        )
-    
-    # Seçime göre başlıkları ve fonksiyonu belirle
-    if "Mean" in stat_mode:
-        col_label_f = "Female (Mean ± SD)"
-        col_label_m = "Male (Mean ± SD)"
-        func_stat = _mean_sd
-    else:
-        col_label_f = "Female (Median [Min-Max])"
-        col_label_m = "Male (Median [Min-Max])"
-        func_stat = _median_min_max
+    # --- 4. OTOMATİK İSTATİSTİK FONKSİYONU ---
+    def get_auto_stat(series):
+        """
+        Otomatik Normallik Testi:
+        - Veri Normalse -> Mean ± SD
+        - Veri Normal Değilse -> Median [Min - Max]
+        """
+        s = pd.to_numeric(series, errors="coerce").dropna()
+        if s.empty: return "—"
+        if len(s) < 3: return f"{s.mean():.2f}" # Test için yetersiz sayı, direkt ortalama
+        
+        # Normallik Testi (Shapiro-Wilk)
+        # N > 5000 ise test çok hassaslaşır, KS testi veya basit limit kullanılabilir.
+        is_normal = False
+        try:
+            if len(s) <= 5000:
+                stat, p = stats.shapiro(s)
+            else:
+                # Büyük veride KS testi (Ortalama ve Sapmayı vererek)
+                stat, p = stats.kstest(s, 'norm', args=(s.mean(), s.std()))
+            
+            is_normal = (p > 0.05) # p > 0.05 ise H0 reddedilemez (Normal Dağılım)
+        except:
+            is_normal = False # Hata durumunda non-parametrik davran
+            
+        if is_normal:
+            mean = s.mean()
+            std = s.std(ddof=1)
+            return f"{mean:.2f} ± {std:.2f}"
+        else:
+            med = s.median()
+            mn = s.min()
+            mx = s.max()
+            return f"{med:.2f} [{mn:.2f}–{mx:.2f}]"
 
+    # --- 5. İSTATİSTİK TABLOSU OLUŞTURMA ---
+    # Cinsiyet Temizliği
+    unique_pats = base_v[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
+    unique_pats['Gender_Clean'] = unique_pats['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+    
+    n_fem = len(unique_pats[unique_pats['Gender_Clean'] == 'Kadın'])
+    n_male = len(unique_pats[unique_pats['Gender_Clean'] == 'Erkek'])
+    
+    st.markdown(f"**Seçilen Grubun İstatistikleri** (Kadın n={n_fem} | Erkek n={n_male})")
+    
     rows = []
     
-    # ADIM 1 - YAŞ'ı özel olarak işle
+    # A) YAŞ İSTATİSTİĞİ
     if "YAS" in base_v.columns:
-        age_data = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].dropna(subset=['PROTOKOL_NO', 'YAS']).drop_duplicates(subset=['PROTOKOL_NO'])
-        # 1 yaş temizliği
-        age_data['YAS'] = pd.to_numeric(age_data['YAS'], errors='coerce').replace(1, np.nan)
-        age_data['Gender_Clean'] = age_data['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
+        age_df = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].drop_duplicates(subset=['PROTOKOL_NO'])
+        age_df['YAS'] = pd.to_numeric(age_df['YAS'], errors='coerce').replace(1, np.nan)
+        age_df['Gender_Clean'] = age_df['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
-        fem_age = age_data.loc[age_data['Gender_Clean'] == 'Kadın', "YAS"]
-        male_age = age_data.loc[age_data['Gender_Clean'] == 'Erkek', "YAS"]
+        f_age = age_df.loc[age_df['Gender_Clean'] == 'Kadın', 'YAS']
+        m_age = age_df.loc[age_df['Gender_Clean'] == 'Erkek', 'YAS']
         
         rows.append({
-            "Parameter": "Yaş (yıl)", 
-            col_label_f: func_stat(fem_age), 
-            col_label_m: func_stat(male_age), 
-            "Reference range": PARAMS.get("YAS", ("Yaş", "—"))[1]
+            "Parametre": "YAŞ (Yıl)",
+            f"Kadın (n={n_fem})": get_auto_stat(f_age),
+            f"Erkek (n={n_male})": get_auto_stat(m_age),
+            "Referans": "—"
         })
 
-    # ADIM 2 - Kalan PARAMS'ları (Hemogram, HPLC) işle
+    # B) PARAMETRELER (Hemogram & HPLC)
     for tetkik_key, (disp, ref) in PARAMS.items():
         if tetkik_key == "YAS": continue 
             
@@ -911,25 +880,28 @@ if variant_choice != "(Tümü)":
         fem = subp.loc[subp['Gender_Clean'] == 'Kadın', "__VAL_NUM__"]
         male = subp.loc[subp['Gender_Clean'] == 'Erkek', "__VAL_NUM__"]
         
+        # Eğer veri hiç yoksa ekleme
+        if len(fem) == 0 and len(male) == 0: continue
+        
         rows.append({
-            "Parameter": disp, 
-            col_label_f: func_stat(fem), 
-            col_label_m: func_stat(male), 
-            "Reference range": ref
+            "Parametre": disp, 
+            f"Kadın (n={n_fem})": get_auto_stat(fem), 
+            f"Erkek (n={n_male})": get_auto_stat(male), 
+            "Referans": ref
         })
     
     table_fm = pd.DataFrame(rows)
     
     if table_fm.empty:
-        st.info("Bu varyant için parametrik veri bulunamadı.")
+        st.info("Seçilen grup için parametrik veri bulunamadı.")
     else:
         st.dataframe(table_fm, use_container_width=True)
+        st.caption("ℹ️ Değerler dağılım normalse 'Ortalama ± SS', değilse 'Ortanca [Min – Max]' olarak gösterilmektedir.")
         
-        file_suffix = "mean_sd" if "Mean" in stat_mode else "median_minmax"
         st.download_button(
-            f"⬇️ Tabloyu İndir (CSV - {file_suffix})",
+            f"⬇️ İstatistik Tablosunu İndir (CSV)",
             data=table_fm.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"varyant_ozet_{variant_choice}_{file_suffix}.csv", 
+            file_name=f"ozellestirilmis_varyant_istatistik.csv", 
             mime="text/csv"
         )
 

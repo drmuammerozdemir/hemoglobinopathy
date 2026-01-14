@@ -753,7 +753,7 @@ if "VARIANT_TAG" not in work.columns:
                    .reset_index())
     work = work.merge(var_map, on="PROTOKOL_NO", how="left")
 
-# ================= VARYANT ÖZETİ (etiketleme ve istatistik) - REVİZE EDİLDİ ================= #
+# ================= VARYANT ÖZETİ (etiketleme ve istatistik) - FİNAL REVİZE (TUTARLI) ================= #
 if "VARIANT_TAG" not in work.columns:
     var_map = (work.groupby("PROTOKOL_NO", group_keys=False)
                    .apply(lambda g: pd.Series({"VARIANT_TAG": pick_variant_tag(g)}))
@@ -767,7 +767,6 @@ st.caption("Birden fazla varyant grubunu seçerek (örn. Mikrositik ve Normositi
 present_tags = sorted([t for t in work["VARIANT_TAG"].dropna().unique()])
 
 # --- 1. ÇOKLU SEÇİM KUTUSU (MULTIPLE SELECT) ---
-# Varsayılan olarak tüm etiketler seçili gelir, isterseniz çıkarabilirsiniz.
 selected_tags = st.multiselect(
     "Analiz edilecek grupları seçin (Çoklu seçim):",
     options=present_tags,
@@ -775,28 +774,73 @@ selected_tags = st.multiselect(
     help="İstediğiniz grupları ekleyip çıkararak özel bir havuz oluşturabilirsiniz."
 )
 
-# --- 2. VERİ FİLTRELEME ---
+# --- 2. VERİ FİLTRELEME VE ÇİFTE SAYIM MANTIĞI (PİVOT İLE EŞİTLEME) ---
 if not selected_tags:
     st.warning("Lütfen en az bir grup seçin.")
     base_v = pd.DataFrame()
 else:
-    # Sadece seçilen etiketlere sahip hastaları al
+    # A) İlk Filtreleme: Seçilen etiketlere sahip satırları al
     base_v = work[work["VARIANT_TAG"].isin(selected_tags)].copy()
+    
+    # B) Çifte Sayım (Double Counting) Enjeksiyonu
+    # Pivot Tablodaki mantığın AYNISI: Borderline olup A2>3.5 olanları bul ve kopyala.
+    
+    # 1. Borderline olan protokolleri bul
+    borderline_protocols = work[work["VARIANT_TAG"] == "Borderline HbA2"]["PROTOKOL_NO"].unique()
+    
+    if len(borderline_protocols) > 0:
+        # 2. Bu kişilerin A2 değerlerine bak
+        a2_tests = ["A2/", "HbA2 (%)", "Hb A2", "Hb A2 (%)"]
+        borderline_data = work[
+            (work["PROTOKOL_NO"].isin(borderline_protocols)) & 
+            (work["TETKIK_ISMI"].isin(a2_tests))
+        ]
+        
+        # 3. A2 > 3.5 olanları tespit et
+        double_count_protos = borderline_data[
+            pd.to_numeric(borderline_data["__VAL_NUM__"], errors='coerce') > 3.5
+        ]["PROTOKOL_NO"].unique()
+        
+        # 4. Eğer kullanıcı "HbA2↑ (B-thal Trait)" grubunu seçmişse, bu kopyaları havuza ekle
+        if "HbA2↑ (B-thal Trait)" in selected_tags and len(double_count_protos) > 0:
+            
+            # Kopyalanacak satırları ana work tablosundan çek (Borderline etiketli hallerini)
+            rows_to_dup = work[work["PROTOKOL_NO"].isin(double_count_protos)].copy()
+            # Sadece Borderline olan satırları al (Güvenlik)
+            rows_to_dup = rows_to_dup[rows_to_dup["VARIANT_TAG"] == "Borderline HbA2"]
+            
+            # Etiketlerini değiştir (Sanki Traitmiş gibi davran)
+            rows_to_dup["VARIANT_TAG"] = "HbA2↑ (B-thal Trait)"
+            
+            # Ana havuza ekle
+            base_v = pd.concat([base_v, rows_to_dup], ignore_index=True)
+            
+            st.info(f"ℹ️ **Pivot Tablo ile Eşitleme:** {len(double_count_protos)} adet 'Borderline' hasta, A2>3.5 olduğu için bu tabloya 'Beta Talasemi Taşıyıcısı' olarak da eklendi.")
 
 if not base_v.empty:
 
-    # --- 3. FREKANS TABLOSU (Seçilenler İçin) ---
-    freq = (base_v["VARIANT_TAG"].value_counts(dropna=True)
-            .rename_axis("Varyant Grubu").to_frame("N").reset_index())
+    # --- 3. FREKANS TABLOSU (DÜZELTİLDİ: NUNIQUE KULLANILDI) ---
+    # Eskiden value_counts() satır sayıyordu, şimdi unique protokol sayıyor.
+    freq = (base_v.groupby("VARIANT_TAG")["PROTOKOL_NO"].nunique()
+            .rename_axis("Varyant Grubu").reset_index(name="Hasta Sayısı"))
     
-    total_n_selected = int(freq["N"].sum())
+    freq = freq.sort_values("Hasta Sayısı", ascending=False)
+    
+    total_n_selected = int(freq["Hasta Sayısı"].sum()) # Kümülatif toplam (Çifte sayım dahil)
+    
+    # Gerçek tekil hasta sayısı (Çifte sayım hariç)
+    real_unique_n = base_v["PROTOKOL_NO"].nunique()
+    
     if total_n_selected > 0:
-        freq["% (Seçim)"] = (freq["N"] / total_n_selected * 100).round(2)
+        freq["% (Seçim)"] = (freq["Hasta Sayısı"] / total_n_selected * 100).round(2)
     
     # Frekansları göster
     c1, c2 = st.columns([1, 2])
     with c1:
-        st.metric("Seçilen Havuz Toplamı", f"{total_n_selected} Hasta")
+        st.metric("Görüntülenen Toplam (n)", f"{total_n_selected}")
+        if total_n_selected != real_unique_n:
+            st.caption(f"(Tekil Hasta Sayısı: {real_unique_n})")
+            
     with c2:
         with st.expander("Grup Dağılımını Göster", expanded=False):
             st.dataframe(freq, use_container_width=True)
@@ -808,36 +852,33 @@ if not base_v.empty:
     def get_auto_stat(series):
         """
         Otomatik Normallik Testi:
-        - Veri Normalse -> Mean ± SD
-        - Veri Normal Değilse -> Median [Min - Max]
+        - Veri Normalse -> Mean ± SD (a)
+        - Veri Normal Değilse -> Median [Min - Max] (b)
         """
         s = pd.to_numeric(series, errors="coerce").dropna()
         if s.empty: return "—"
-        if len(s) < 3: return f"{s.mean():.2f}" # Test için yetersiz sayı, direkt ortalama
+        if len(s) < 3: return f"{s.mean():.2f}" 
         
-        # Normallik Testi (Shapiro-Wilk)
-        # N > 5000 ise test çok hassaslaşır, KS testi veya basit limit kullanılabilir.
         is_normal = False
         try:
             if len(s) <= 5000:
                 stat, p = stats.shapiro(s)
             else:
-                # Büyük veride KS testi (Ortalama ve Sapmayı vererek)
                 stat, p = stats.kstest(s, 'norm', args=(s.mean(), s.std()))
             
-            is_normal = (p > 0.05) # p > 0.05 ise H0 reddedilemez (Normal Dağılım)
+            is_normal = (p > 0.05) 
         except:
-            is_normal = False # Hata durumunda non-parametrik davran
+            is_normal = False 
             
         if is_normal:
             mean = s.mean()
             std = s.std(ddof=1)
-            return f"{mean:.2f} ± {std:.2f}"
+            return f"{mean:.2f} ± {std:.2f}ᵃ"
         else:
             med = s.median()
             mn = s.min()
             mx = s.max()
-            return f"{med:.2f} [{mn:.2f}–{mx:.2f}]"
+            return f"{med:.2f} [{mn:.2f}–{mx:.2f}]ᵇ"
 
     # --- 5. İSTATİSTİK TABLOSU OLUŞTURMA ---
     # Cinsiyet Temizliği
@@ -896,7 +937,7 @@ if not base_v.empty:
         st.info("Seçilen grup için parametrik veri bulunamadı.")
     else:
         st.dataframe(table_fm, use_container_width=True)
-        st.caption("ℹ️ Değerler dağılım normalse 'Ortalama ± SS', değilse 'Ortanca [Min – Max]' olarak gösterilmektedir.")
+        st.caption("ℹ️ **ᵃ**: Normal Dağılım (Ortalama ± SS) | **ᵇ**: Normal Olmayan Dağılım (Ortanca [Min – Max])")
         
         st.download_button(
             f"⬇️ İstatistik Tablosunu İndir (CSV)",

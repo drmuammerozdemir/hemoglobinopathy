@@ -696,22 +696,16 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         if (not has_micro_hypo) and hbf_val > 5.0: tags.append("HPFH?")
         else: tags.append("HbF↑")
 
-    # D) DEMİR EKSİKLİĞİ ve ALFA TALASEMİ AYRIMI (GELİŞMİŞ)
-    # Kriter: Mikrositik/Hipokromik VE Normal A2 VE Normal F
+    # D) İZOLE MİKROSİTOZ (Non-Beta Grubu) - REVİZE EDİLDİ
+    # Kriter: Mikrositik/Hipokromik (MCV<80) + Normal/Düşük A2 + Normal F
+    # Bu grupta Demir Eksikliği, Alfa Talasemi veya Maskelenmiş Beta Talasemi olabilir.
+    # Kesin ayrım yapmadan "Mikrositik Anemi/Bulgu" olarak etiketliyoruz.
+    
     if has_micro_hypo and hba2_val < 3.3 and hbf_val < 5.0:
-        
-        # Senaryo 1: Anemik ise (HGB Düşük)
         if is_anemic:
-            if mentzer_index > 13:
-                tags.append("Iron Deficiency Anemia (Probable)")
-            else:
-                # Hem anemik hem mentzer < 13 ise karışık/şüpheli
-                tags.append("Iron Def./Alpha-thal? (Anemic)")
-        
-        # Senaryo 2: Anemik Değilse (HGB Normal ama MCV düşük)
-        # Bu durum Alfa Talasemi Taşıyıcılığı için çok tipiktir
+            tags.append("Microcytic Anemia (Iron Def. or Alpha-thal?)")
         else:
-            tags.append("Alpha-thal Carrier? (Probable)")
+            tags.append("Isolated Microcytosis (Probable Trait/Iron Def.)")
 
     # --- Diğer Varyantlar ---
     for k, var_name in NUMVAR_FROM_TEST.items():

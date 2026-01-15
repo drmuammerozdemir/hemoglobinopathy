@@ -651,6 +651,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     
     if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")
+        
     # --- YENİ KURAL 1d: BETA TALASEMİ INTERMEDIA / MAJOR ŞÜPHESİ ---
     # Kriter: Mikrositoz VAR ve HbF Çok Yüksek (> %10)
     # (Not: S-Beta yukarıda elendiği için buraya sadece Beta türevleri gelir)

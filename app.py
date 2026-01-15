@@ -837,15 +837,17 @@ if not base_v.empty:
         else:
             return f"{s.median():.2f} [{s.min():.2f}–{s.max():.2f}]ᵇ"
 
-    # --- 6. İSTATİSTİK TABLOSU OLUŞTURMA ---
-    # Cinsiyet Temizliği (Tekil hasta bazlı)
+# --- 6. İSTATİSTİK TABLOSU OLUŞTURMA (TOPLAM SÜTUNU EKLENDİ) ---
+    
+    # Cinsiyet ve Toplam Sayı Temizliği
     unique_pats = base_v[['PROTOKOL_NO', 'CINSIYET']].drop_duplicates(subset=['PROTOKOL_NO'])
     unique_pats['Gender_Clean'] = unique_pats['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
     
+    n_total = len(unique_pats) # Toplam Tekil Hasta Sayısı
     n_fem = len(unique_pats[unique_pats['Gender_Clean'] == 'Kadın'])
     n_male = len(unique_pats[unique_pats['Gender_Clean'] == 'Erkek'])
     
-    st.markdown(f"**Seçilen Grubun İstatistikleri** (Kadın n={n_fem} | Erkek n={n_male})")
+    st.markdown(f"**Seçilen Grubun İstatistikleri** (Toplam n={n_total} | Kadın n={n_fem} | Erkek n={n_male})")
     
     rows = []
     
@@ -855,11 +857,13 @@ if not base_v.empty:
         age_df['YAS'] = pd.to_numeric(age_df['YAS'], errors='coerce').replace(1, np.nan)
         age_df['Gender_Clean'] = age_df['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
+        t_age = age_df['YAS'] # Toplam Yaş Serisi
         f_age = age_df.loc[age_df['Gender_Clean'] == 'Kadın', 'YAS']
         m_age = age_df.loc[age_df['Gender_Clean'] == 'Erkek', 'YAS']
         
         rows.append({
             "Parametre": "YAŞ (Yıl)",
+            f"Toplam (n={n_total})": get_auto_stat(t_age), # YENİ SÜTUN
             f"Kadın (n={n_fem})": get_auto_stat(f_age),
             f"Erkek (n={n_male})": get_auto_stat(m_age),
             "Referans": "—"
@@ -876,14 +880,17 @@ if not base_v.empty:
         subp = add_numeric_copy(subp)
         subp['Gender_Clean'] = subp['CINSIYET'].astype(str).map(normalize_sex_label).fillna('Bilinmiyor')
         
+        # Değerleri Ayır
+        vals_total = subp["__VAL_NUM__"] # Toplam Değerler
         fem = subp.loc[subp['Gender_Clean'] == 'Kadın', "__VAL_NUM__"]
         male = subp.loc[subp['Gender_Clean'] == 'Erkek', "__VAL_NUM__"]
         
-        # Eğer veri hiç yoksa ekleme
-        if len(fem) == 0 and len(male) == 0: continue
+        # Eğer hiç veri yoksa tabloya ekleme
+        if len(vals_total) == 0: continue
         
         rows.append({
             "Parametre": disp, 
+            f"Toplam (n={n_total})": get_auto_stat(vals_total), # YENİ SÜTUN
             f"Kadın (n={n_fem})": get_auto_stat(fem), 
             f"Erkek (n={n_male})": get_auto_stat(male), 
             "Referans": ref

@@ -738,9 +738,8 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "HbA2↑ (Normocytic / Masked?)",
         "HbA2↑ (B-thal Trait)",
         
-        "Iron Deficiency Anemia (Probable)",
-        "Iron Def./Alpha-thal? (Anemic)",
-        "Alpha-thal Carrier? (Probable)",
+        "Microcytic Anemia (Iron Def. or Alpha-thal?)",
+        "Isolated Microcytosis (Probable Trait/Iron Def.)",
         
         "HPFH?", "HbF↑",
         "Normal (Assumed)", "Normal"

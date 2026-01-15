@@ -632,13 +632,13 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
     tags = [] 
 
 # --- 1. S-Beta Talasemi (Yüksek A2 + Yüksek S + Mikrositoz) ---
-    if has_micro_hypo and hba2_val > 3.5 and hbs_val > 50:
+    if has_micro_hypo and hba2_val >= 3.5 and hbs_val > 50:
         if hba_present: tags.append("Hb S-β+ thal")
         else: tags.append("Hb S-β0 thal")
 
     # --- 2. Orak Hücre Anemisi (HbSS) ---
     # HbS > 75 ve HbA2 Normal ise
-    elif hbs_val > 75 and hba2_val <= 3.5:
+    elif hbs_val > 75 and hba2_val < 3.5:
         tags.append("Sickle Cell Anemia (HbSS)")
 
     # --- 3. Orak Hücre Taşıyıcısı (HbAS) ---
@@ -649,14 +649,14 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         
     # Not: hbs_val < 10 ise hiçbir şeye girmez (Normal kabul edilir), doğrusu budur.
     
-    if has_micro_hypo and hba2_val <= 3.5 and (hbf_val >= 5 and hbf_val <= 20):
+    if has_micro_hypo and hba2_val < 3.5 and (hbf_val >= 5 and hbf_val <= 20):
         tags.append("δβ-thal Trait")
         
     # --- YENİ KURAL 1d: BETA TALASEMİ INTERMEDIA / MAJOR ŞÜPHESİ ---
     # Kriter: Mikrositoz VAR ve HbF Çok Yüksek (> %10)
     # (Not: S-Beta yukarıda elendiği için buraya sadece Beta türevleri gelir)
     if hbf_val > 10.0:
-         if hba2_val > 3.5:
+         if hba2_val >= 3.5:
              tags.append("B-thal Intermedia (High A2/High F)")
          else:
              tags.append("B-thal Intermedia (High F only)")
@@ -677,18 +677,18 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
 
     # --- Kural 3: Basit Kantitatif ---
     # A) Klasik A2 Taşıyıcı (> 3.5)
-    if hba2_val > 3.5 and has_micro_hypo:
+    if hba2_val >= 3.5 and has_micro_hypo:
         tags.append("HbA2↑ (B-thal Trait)")
         
     # NORMOSİTİK A2 YÜKSEKLİĞİ (Maskelenmiş?)
     # Şart: A2 > 3.5 ama MCV Normal. 
     # (B12 eksikliği ile maskelenmiş talasemi veya hipertiroidi olabilir)
-    elif hba2_val > 3.5 and not has_micro_hypo:
+    elif hba2_val >= 3.5 and not has_micro_hypo:
         tags.append("HbA2↑ (Normocytic / Masked?)")
     
-    # B) Borderline (3.3 - 3.8 arası)
-    # A2 3.3-3.8 arası
-    criteria_a = (hba2_val >= 3.3 and hba2_val <= 3.8) and has_micro_hypo
+    # B) Borderline (3.3 - 3.5 arası)
+    # A2 3.3-3.5 arası
+    criteria_a = (hba2_val >= 3.3 and hba2_val <= 3.49) and has_micro_hypo
     if criteria_a:
         tags.append("Borderline HbA2")
       

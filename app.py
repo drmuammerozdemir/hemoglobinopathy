@@ -735,6 +735,7 @@ def pick_variant_tag(g: pd.DataFrame) -> str | None:
         "HbS Trait",
         
         "Borderline HbA2",
+        "HbA2↑ (Normocytic / Masked?)",
         "HbA2↑ (B-thal Trait)",
         
         "Iron Deficiency Anemia (Probable)",

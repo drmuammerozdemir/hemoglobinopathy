@@ -852,7 +852,7 @@ if not base_v.empty:
     
     rows = []
     
-    # A) YAŞ İSTATİSTİĞİ
+# A) YAŞ İSTATİSTİĞİ
     if "YAS" in base_v.columns:
         age_df = base_v[['PROTOKOL_NO', 'CINSIYET', 'YAS']].drop_duplicates(subset=['PROTOKOL_NO'])
         age_df['YAS'] = pd.to_numeric(age_df['YAS'], errors='coerce').replace(1, np.nan)
@@ -862,11 +862,48 @@ if not base_v.empty:
         f_age = age_df.loc[age_df['Gender_Clean'] == 'Kadın', 'YAS']
         m_age = age_df.loc[age_df['Gender_Clean'] == 'Erkek', 'YAS']
         
+        # ==========================================
+        # 🆕 YENİ EKLEME: YAŞ İÇİN İSTATİSTİK (K vs E)
+        # ==========================================
+        p_text_age = "—"
+        f_clean_age = f_age.dropna()
+        m_clean_age = m_age.dropna()
+
+        if len(f_clean_age) > 1 and len(m_clean_age) > 1:
+            try:
+                # 1. Normallik Testi (İç fonksiyon veya inline)
+                def is_norm_local(data):
+                    if len(data) < 3: return False
+                    if len(data) <= 5000: return stats.shapiro(data)[1] > 0.05
+                    else: return stats.kstest(data, 'norm', args=(data.mean(), data.std()))[1] > 0.05
+                
+                norm_f = is_norm_local(f_clean_age)
+                norm_m = is_norm_local(m_clean_age)
+
+                # 2. Test Seçimi
+                if norm_f and norm_m:
+                    stat, p_val = stats.ttest_ind(f_clean_age, m_clean_age, equal_var=False) # Welch
+                    test_name = "T-test"
+                else:
+                    stat, p_val = stats.mannwhitneyu(f_clean_age, m_clean_age)
+                    test_name = "MWU"
+
+                # 3. Formatlama
+                if p_val < 0.001: p_str = "<0.001"
+                else: p_str = f"{p_val:.3f}"
+                
+                p_text_age = f"{p_str} ({test_name})"
+
+            except Exception:
+                p_text_age = "Hata"
+        # ==========================================
+
         rows.append({
             "Parametre": "YAŞ (Yıl)",
-            f"Toplam (n={n_total})": get_auto_stat(t_age), # YENİ SÜTUN
+            f"Toplam (n={n_total})": get_auto_stat(t_age),
             f"Kadın (n={n_fem})": get_auto_stat(f_age),
             f"Erkek (n={n_male})": get_auto_stat(m_age),
+            "p Değeri (K vs E)": p_text_age,  # <--- Sütun eklendi
             "Referans": "—"
         })
 

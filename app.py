@@ -870,7 +870,7 @@ if not base_v.empty:
             "Referans": "—"
         })
 
-    # B) PARAMETRELER (Hemogram & HPLC)
+# B) PARAMETRELER (Hemogram & HPLC)
     for tetkik_key, (disp, ref) in PARAMS.items():
         if tetkik_key == "YAS": continue 
         
@@ -888,12 +888,53 @@ if not base_v.empty:
         
         # Eğer hiç veri yoksa tabloya ekleme
         if len(vals_total) == 0: continue
+
+        # ==========================================
+        # 🆕 YENİ EKLEME: İSTATİSTİKSEL KARŞILAŞTIRMA (K vs E)
+        # ==========================================
+        p_text = "—"
+        f_clean = pd.to_numeric(fem, errors="coerce").dropna()
+        m_clean = pd.to_numeric(male, errors="coerce").dropna()
+
+        if len(f_clean) > 1 and len(m_clean) > 1:
+            try:
+                # 1. Normallik Testi (Her iki grup için)
+                def is_norm(data):
+                    if len(data) < 3: return False # Çok az veri varsa non-parametrik varsay
+                    if len(data) <= 5000: return stats.shapiro(data)[1] > 0.05
+                    else: return stats.kstest(data, 'norm', args=(data.mean(), data.std()))[1] > 0.05
+                
+                norm_f = is_norm(f_clean)
+                norm_m = is_norm(m_clean)
+
+                # 2. Test Seçimi ve Uygulama
+                if norm_f and norm_m:
+                    # İkisi de normalse -> T-Test (Welch: varyanslar eşit değil varsayımı daha güvenlidir)
+                    stat, p_val = stats.ttest_ind(f_clean, m_clean, equal_var=False)
+                    test_name = "T-test"
+                else:
+                    # En az biri normal değilse -> Mann-Whitney U
+                    stat, p_val = stats.mannwhitneyu(f_clean, m_clean)
+                    test_name = "MWU"
+
+                # 3. P Değeri Formatlama
+                if p_val < 0.001: p_str = "<0.001"
+                else: p_str = f"{p_val:.3f}"
+                
+                # Anlamlıysa kalın yaz (Opsiyonel görselleştirme)
+                # p_text = f"**{p_str}** ({test_name})" if p_val < 0.05 else f"{p_str} ({test_name})"
+                p_text = f"{p_str} ({test_name})"
+
+            except Exception as e:
+                p_text = "Hata"
+        # ==========================================
         
         rows.append({
             "Parametre": disp, 
-            f"Toplam (n={n_total})": get_auto_stat(vals_total), # YENİ SÜTUN
+            f"Toplam (n={n_total})": get_auto_stat(vals_total), 
             f"Kadın (n={n_fem})": get_auto_stat(fem), 
             f"Erkek (n={n_male})": get_auto_stat(male), 
+            "p Değeri (K vs E)": p_text, # <--- Sütun buraya eklendi
             "Referans": ref
         })
     
